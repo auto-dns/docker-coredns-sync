@@ -1,0 +1,10 @@
+services:
+  docker-coredns-sync:
+    build: .
+    container_name: docker-coredns-sync
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
