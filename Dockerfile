@@ -1,6 +1,6 @@
 FROM python:3.11-slim AS base
 WORKDIR /app
-LABEL org.opencontainers.image.source="https://github.com/the original repository"
+LABEL org.opencontainers.image.source https://github.com/the original repository
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 COPY requirements.txt ./
