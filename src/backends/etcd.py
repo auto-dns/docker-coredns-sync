@@ -3,11 +3,15 @@ import json
 import re
 import time
 from contextlib import contextmanager
-from .config import ETCD_HOST, ETCD_PATH_PREFIX, HOSTNAME
-from .logger import logger
-from .record import parse_record, is_owned_by, DEFAULT_TTL
+from config import load_settings
+from logger import setup_logger
+from ..core.record import parse_record, is_owned_by, DEFAULT_TTL
 
-client = etcd3.client(host=ETCD_HOST, port=2379)
+
+logger = setup_logger()
+settings = load_settings()
+
+client = etcd3.client(host=settings.etcd_host, port=settings.etcd_port)
 LOCK_PREFIX = "__lock__:/"
 LOCK_TTL = 3  # seconds
 LOCK_RETRY_INTERVAL = 0.1
@@ -22,7 +26,7 @@ def key_to_fqdn(key):
     return ".".join(reversed(cleaned_key.split("/")))
 
 def etcd_full_key(key):
-    return f"{ETCD_PATH_PREFIX.rstrip('/')}/{key}"
+    return f"{settings.etcd_path_prefix.rstrip('/')}/{key}"
 
 def _would_create_cname_cycle(fqdn, target, visited=None, existing_records=None):
     """
@@ -97,7 +101,7 @@ def etcd_lock(key):
             lease = client.lease(LOCK_TTL)
             success, _ = client.transaction(
                 compare=[client.transactions.create(lock_key) == 0],
-                success=[client.transactions.put(lock_key, HOSTNAME, lease)],
+                success=[client.transactions.put(lock_key, settings.hostname, lease)],
                 failure=[],
             )
             if success:
@@ -170,8 +174,8 @@ def put_record(fqdn, value, record_type="A", force=False):
                     if (record.get("record_type") == record_type and
                         record_type in ('A', 'CNAME') and
                         record.get("host") == value and
-                        record.get("owner") == HOSTNAME):
-                        logger.info(f"Found {record_type} record for {fqdn} -> {value} owned by this host ({HOSTNAME})")
+                        record.get("owner") == settings.hostname):
+                        logger.info(f"Found {record_type} record for {fqdn} -> {value} owned by this host ({settings.hostname})")
                         return False, True, False, record_key
                     
                     existing_records[record_key] = record
@@ -215,12 +219,12 @@ def put_record(fqdn, value, record_type="A", force=False):
                 
                 # Check if we already have an A record owned by this host
                 for key, record in existing_a_records:
-                    if is_owned_by(record, HOSTNAME):
+                    if is_owned_by(record, settings.hostname):
                         # We found our own record
                         if force:
                             # Update existing record
                             new_record = record.copy()
-                            new_record["a"] = [{"ttl": DEFAULT_TTL, "ip": value}]
+                            new_record["a"] = [{"ttl": DEFAULT_TTL, "host": value}]
                             client.put(key, json.dumps(new_record))
                             logger.info(f"Updated existing A record for {fqdn} -> {value}")
                             return True, True, False, key
@@ -239,7 +243,7 @@ def put_record(fqdn, value, record_type="A", force=False):
             new_key = f"{full_key_prefix}/x{next_index}"
             
             # Create the record based on type
-            new_record = {"record_type": record_type, "owner": HOSTNAME}
+            new_record = {"record_type": record_type, "owner": settings.hostname}
 
             if record_type in ("A", "CNAME"):
                 new_record["host"] = value
@@ -279,7 +283,7 @@ def delete_record(fqdn, value=None, record_type="A"):
                     record = parse_record(raw.decode())
                     
                     # Only delete records owned by this host
-                    if is_owned_by(record, HOSTNAME):
+                    if is_owned_by(record, settings.hostname):
                         # If value is specified, only delete records with matching value
                         if value is not None:
                             if record_type == "A":
@@ -298,14 +302,14 @@ def delete_record(fqdn, value=None, record_type="A"):
 
 def cleanup_stale_records(running_container_keys):
     try:
-        prefix = ETCD_PATH_PREFIX.rstrip("/") + "/"
+        prefix = settings.etcd_path_prefix.rstrip("/") + "/"
         for value, meta in client.get_prefix(prefix):
             key = meta.key.decode()
             logger.debug(f"Checking etcd key: {key}")
             if key not in running_container_keys:
                 try:
                     record = parse_record(value)
-                    if is_owned_by(record, HOSTNAME):
+                    if is_owned_by(record, settings.hostname):
                         logger.warning(f"Removing stale entry {key}")
                         client.delete(meta.key)
                 except Exception as e:

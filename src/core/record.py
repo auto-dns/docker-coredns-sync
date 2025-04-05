@@ -1,5 +1,5 @@
 import json
-from .logger import logger
+from ..logger import logger
 
 DEFAULT_TTL = 300
 
