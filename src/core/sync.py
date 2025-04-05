@@ -3,9 +3,11 @@ import signal
 import time
 from queue import Queue, Empty
 from threading import Thread
-from .config import DOCKER_LABEL_PREFIX, HOST_IP
-from .etcd import put_record, delete_record, cleanup_stale_records, fqdn_to_key
-from .logger import logger
+from config import load_settings
+from ..backends.etcd import put_record, delete_record, cleanup_stale_records, fqdn_to_key
+from ..logger import logger
+
+settings = load_settings()
 
 client = docker.from_env()
 event_queue = Queue()
@@ -16,10 +18,10 @@ container_cache = {}
 
 # Container utility functions
 def is_enabled(container):
-    return container.labels.get(f"{DOCKER_LABEL_PREFIX}.enabled", "false").lower() == "true"
+    return container.labels.get(f"{settings.docker_label_prefix}.enabled", "false").lower() == "true"
 
 def is_force_enabled(container):
-    return container.labels.get(f"{DOCKER_LABEL_PREFIX}.force", "false").lower() == "true"
+    return container.labels.get(f"{settings.docker_label_prefix}.force", "false").lower() == "true"
 
 # Cache container information for later use
 def cache_container(container_id, container):
@@ -55,7 +57,7 @@ def collect_events():
 
 def get_container_domains(container):
     labels = container.labels
-    if not labels.get(f"{DOCKER_LABEL_PREFIX}.enabled", "false").lower() == "true":
+    if not labels.get(f"{settings.docker_label_prefix}.enabled", "false").lower() == "true":
         return []
 
     records = []
@@ -66,15 +68,15 @@ def get_container_domains(container):
         parts = key.split('.')
         
         # Format 1: prefix.record_type.field_name (for single records)
-        if len(parts) == 3 and parts[0] == DOCKER_LABEL_PREFIX and parts[2] in ["name", "value"]:
+        if len(parts) == 3 and parts[0] == settings.docker_label_prefix and parts[2] in ["name", "value"]:
             record_type = parts[1]
-            record_prefixes.add(f"{DOCKER_LABEL_PREFIX}.{record_type}")
+            record_prefixes.add(f"{settings.docker_label_prefix}.{record_type}")
         
         # Format 2: prefix.record_type.identifier.field_name (for multiple records)
-        elif len(parts) >= 4 and parts[0] == DOCKER_LABEL_PREFIX and parts[3] in ["name", "value"]:
+        elif len(parts) >= 4 and parts[0] == settings.docker_label_prefix and parts[3] in ["name", "value"]:
             record_type = parts[1]
             identifier = parts[2]
-            record_prefixes.add(f"{DOCKER_LABEL_PREFIX}.{record_type}.{identifier}")
+            record_prefixes.add(f"{settings.docker_label_prefix}.{record_type}.{identifier}")
     
     # Process each unique record
     for prefix in record_prefixes:
@@ -94,7 +96,7 @@ def get_container_domains(container):
         
         if record_type == "A":
             # For A records, value is optional (defaults to HOST_IP)
-            record_value = labels.get(value_key, HOST_IP)
+            record_value = labels.get(value_key, settings.host_ip)
             records.append((name, record_type, record_value))
         elif record_type == "CNAME":
             # For CNAME records, value is required
