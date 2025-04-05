@@ -1,8 +1,15 @@
 import logging
-from .config import LOG_LEVEL
+from src.config import load_settings
 
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
-logger = logging.getLogger(__name__)
+
+def setup_logger() -> logging.Logger:
+    settings = load_settings()
+
+    logging.basicConfig(
+        level=settings.log_level.upper(),
+        format="%(asctime)s [%(levelname)s] %(message)s",
+    )
+
+    return logging.getLogger("docker_coredns_sync")
+
+logger = setup_logger()

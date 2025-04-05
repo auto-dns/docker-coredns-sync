@@ -2,3 +2,4 @@ docker
 etcd3
 requests
 protobuf>=3.20.0,<3.21.0
+pydantic
