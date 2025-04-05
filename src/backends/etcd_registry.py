@@ -55,11 +55,11 @@ class EtcdRegistry(RegistryWithLock):
 		try:
 			for key in keys:
 				lock_key = f"/locks/{key}"
-				lease = self.client.lease(5)
+				lease = self.client.lease(settings.etcd_lock_ttl)
 				acquired = False
 				start = time.time()
 
-				while time.time() - start < 2.0:
+				while time.time() - start < settings.etcd_lock_timeout:
 					success, _ = self.client.transaction(
 						compare=[self.client.transactions.create(lock_key) == 0],
 						success=[self.client.transactions.put(lock_key, settings.hostname, lease)],
@@ -70,7 +70,7 @@ class EtcdRegistry(RegistryWithLock):
 						leases.append((lock_key, lease))
 						break
 
-					time.sleep(0.1)
+					time.sleep(settings.etcd_lock_retry_interval)
 
 				if not acquired:
 					raise EtcdConnectionError(f"Failed to acquire lock on {key}")
