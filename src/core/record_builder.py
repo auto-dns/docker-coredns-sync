@@ -14,7 +14,7 @@ def _get_force(labels, container_force_label, record_force_label):
 	return force
 
 
-def get_container_records(container) -> list[RecordIntent]:
+def get_container_record_intents(container) -> list[RecordIntent]:
 	labels = container.labels
 	allowed_record_types = set(settings.allowed_record_types)
 	prefix = settings.docker_label_prefix
