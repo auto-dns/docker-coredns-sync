@@ -4,7 +4,7 @@ from core.record_validator import validate_record
 from core.record_reconciler import reconcile_records
 from interfaces.registry_interface import DnsRegistry
 from core.docker_watcher import DockerWatcher
-from core.record_builder import build_records_from_container
+from core.record_builder import get_container_record_intents
 from logger import logger
 
 
@@ -20,7 +20,7 @@ class SyncEngine:
             return
 
         if container.status == "running":
-            record_intents = build_records_from_container(container)
+            record_intents = get_container_record_intents(container)
             if record_intents:
                 self.state.upsert(container.id, record_intents, "running")
         else:
