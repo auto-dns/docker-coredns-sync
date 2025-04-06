@@ -2,6 +2,9 @@ import logging
 from config import load_settings
 
 
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("docker").setLevel(logging.WARNING)
+
 def setup_logger() -> logging.Logger:
     settings = load_settings()
 
