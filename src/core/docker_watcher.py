@@ -5,7 +5,7 @@ import time
 from docker.models.containers import Container
 from typing import Callable
 from logger import logger
-
+from utils.timing import retry
 
 class DockerWatcher:
 	def __init__(self):
@@ -47,7 +47,7 @@ class DockerWatcher:
 					continue
 
 				try:
-					container = self._try_get_container(container_id)
+					container = self._safe_get_container(container_id)
 					if container:
 						container.status = status
 						callback(container)
@@ -58,16 +58,9 @@ class DockerWatcher:
 			logger.error(f"[docker_watcher] Docker event loop error: {e}")
 			time.sleep(5)
 
-	def _try_get_container(self, container_id: str, retries=3, delay=0.5):
-		for attempt in range(retries):
-			try:
-				return self.client.containers.get(container_id)
-			except Exception as e:
-				if attempt < retries - 1:
-					time.sleep(delay)
-				else:
-					logger.debug(f"[docker_watcher] Failed to inspect container {container_id} after {retries} retries: {e}")
-		return None
+	@retry(retries=3, delay=0.5, logger_func=logger.error)
+	def _safe_get_container(self, container_id: str):
+		return self.client.containers.get(container_id)
 
 	def stop(self):
 		self.running = False
