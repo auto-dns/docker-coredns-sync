@@ -5,10 +5,13 @@ from typing import Iterable
 
 def validate_record(new_record: Record, existing_records: Iterable[Record]) -> None:
 	"""
-	Validate a single record against a full list of existing records.
+	Validates a proposed DNS record against the current known records.
 
-	Raises:
-		RecordValidationError if any rule is violated.
+	Rules enforced:
+	1. A and CNAME records may not coexist for the same name.
+	2. No duplicate CNAMEs.
+	3. A records with the same IP are disallowed for the same name.
+	4. CNAMEs may not form resolution cycles.
 	"""
 	same_name_records = [r for r in existing_records if r.name == new_record.name]
 	a_records = [r for r in same_name_records if isinstance(r, ARecord)]
