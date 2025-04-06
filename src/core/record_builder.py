@@ -1,11 +1,20 @@
 from config import load_settings
 from core.dns_record import ARecord, CNAMERecord, Record
+from core.record_intent import RecordIntent
+from datetime import datetime, timezone
 from logger import logger
 
 settings = load_settings()
 
+def _get_force(labels, container_force_label, record_force_label):
+	container_force = labels.get(container_force_label, "false").lower() == "true"
+	record_force_label_exists = record_force_label in labels
+	record_force = labels.get(record_force_label, "false").lower() == "true"
+	force = record_force if record_force_label_exists else container_force
+	return force
 
-def get_container_records(container) -> list[Record]:
+
+def get_container_records(container) -> list[RecordIntent]:
 	labels = container.labels
 	allowed_record_types = set(settings.allowed_record_types)
 	prefix = settings.docker_label_prefix
@@ -61,7 +70,13 @@ def get_container_records(container) -> list[Record]:
 			
 			aliased_label_pairs[type][alias][key] = value
 
-	records: list[Record] = []
+	record_intents: list[RecordIntent] = []
+	container_id = container.id
+	container_name = getattr(container, "name", "<unknown>")
+	container_created_str = container.attrs["Created"]
+	container_created = datetime.fromisoformat(container_created_str.replace("Z", "+00:00")).astimezone(timezone.utc)
+	hostname = settings.hostname
+	container_force_label = f"{prefix}.force"
 	
 	# Pass over each set, filtering out invalid records and using default values ones with missing values
 	# Handle base label pairs first
@@ -74,7 +89,20 @@ def get_container_records(container) -> list[Record]:
 				value = settings.host_ip
 				logger.warning(f"[record_builder] {prefix}.A.name={base_label_pairs["A"]["name"]} label found with no matching {prefix}.A.value pair. Using configured host IP {value} as default.")
 			try:
-				records.append(ARecord(name=name, value=value, owner=settings.hostname))
+				force = _get_force(labels=labels, container_force_label=container_force_label, record_force_label=f"{prefix}.A.force")
+				record_intents.append(
+					RecordIntent(
+						container_id=container_id,
+						container_name=container_name,
+						created=container_created,
+						force=force,
+						hostname=hostname,
+						record=ARecord(
+							name=name,
+							value=value,
+						),
+					)
+				)
 			except ValueError as e:
 				logger.warning(f"[record_builder] Invalid ARecord {name}: {e}")
 		elif "value" in base_label_pairs["A"]:
@@ -84,7 +112,20 @@ def get_container_records(container) -> list[Record]:
 			name = base_label_pairs["CNAME"]["name"]
 			value = base_label_pairs["CNAME"]["value"]
 			try:
-				records.append(CNAMERecord(name=name, value=value, owner=settings.hostname))
+				force = _get_force(labels=labels, container_force_label=container_force_label, record_force_label=f"{prefix}.CNAME.force")
+				record_intents.append(
+					RecordIntent(
+						container_id=container_id,
+						container_name=container_name,
+						created=container_created,
+						force=force,
+						hostname=hostname,
+						record=CNAMERecord(
+							name=name,
+							value=value,
+						),
+					)
+				)
 			except ValueError as e:
 				logger.warning(f"[record_builder] Invalid CNAMERecord {name}: {e}")
 		elif "name" in base_label_pairs["CNAME"] and "value" not in base_label_pairs["CNAME"]:
@@ -103,7 +144,20 @@ def get_container_records(container) -> list[Record]:
 					value = settings.host_ip
 					logger.warning(f"[record_builder] {prefix}.A.name={pair["name"]} label found with no matching {prefix}.A.value pair. Using configured host IP {value} as default.")
 				try:
-					records.append(ARecord(name=name, value=value, owner=settings.hostname))
+					force = _get_force(labels=labels, container_force_label=container_force_label, record_force_label=f"{prefix}.A.{alias}.force")
+					record_intents.append(
+						RecordIntent(
+							container_id=container_id,
+							container_name=container_name,
+							created=container_created,
+							force=force,
+							hostname=hostname,
+							record=ARecord(
+								name=name,
+								value=value,
+							),
+						)
+					)
 				except ValueError as e:
 					logger.warning(f"[record_builder] Invalid ARecord {name}: {e}")
 			elif "value" in pair:
@@ -114,7 +168,20 @@ def get_container_records(container) -> list[Record]:
 				name = base_label_pairs["CNAME"]["name"]
 				value = base_label_pairs["CNAME"]["value"]
 				try:
-					records.append(CNAMERecord(name=name, value=value, owner=settings.hostname))
+					force = _get_force(labels=labels, container_force_label=container_force_label, record_force_label=f"{prefix}.CNAME.{alias}.force")
+					record_intents.append(
+						RecordIntent(
+							container_id=container_id,
+							container_name=container_name,
+							created=container_created,
+							force=force,
+							hostname=hostname,
+							record=CNAMERecord(
+								name=name,
+								value=value,
+							),
+						)
+					)
 				except ValueError as e:
 					logger.warning(f"[record_builder] Invalid CNAMERecord {name}: {e}")
 			elif "name" in pair and "value" not in pair:
@@ -122,4 +189,4 @@ def get_container_records(container) -> list[Record]:
 			elif "value" in pair and "name" not in pair:
 				logger.error(f"[record_builder] {prefix}.CNAME.value={pair["value"]} label found with no matching {prefix}.CNAME.name pair.")
 
-	return records
+	return record_intents
