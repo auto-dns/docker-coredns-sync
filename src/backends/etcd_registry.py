@@ -93,15 +93,17 @@ class EtcdRegistry(RegistryWithLock):
 		return f"{settings.etcd_path_prefix}/{'/'.join(parts)}"
 
 	def _get_etcd_value(self, record_intent: RecordIntent) -> str:
-		if isinstance(record_intent, (ARecord, CNAMERecord)):
+		if isinstance(record_intent.record, (ARecord, CNAMERecord)):
 			return json.dumps({
 				"host": str(record_intent.record.value),
 				"record_type": record_intent.record.record_type,
 				"owner_hostname": record_intent.hostname,
 				"owner_container_name": record_intent.container_name,
-				"created": record_intent.created,
+				"created": record_intent.created.isoformat(),
 			})
-		raise RegistryUnsupportedRecordTypeError(f"Unsupported record type: {record_intent.record.record_type}")
+		else:
+			logger.warning(f"[etcd_registry] Unsupported record object: {record_intent.record}")
+			raise RegistryUnsupportedRecordTypeError(f"Unsupported record type: {record_intent.record.record_type}")
 
 	def _parse_etcd_value(self, key: str, value: str) -> RecordIntent:
 		# TODO: Remove these if we run the code and don't get circular import errors
@@ -125,6 +127,7 @@ class EtcdRegistry(RegistryWithLock):
 
 		if record_type.upper() == "A":
 			return RecordIntent(
+				container_id="<from-etcd>",
 				container_name=owner_container_name,
 				created=created,
 				hostname=owner_hostname,
@@ -135,6 +138,7 @@ class EtcdRegistry(RegistryWithLock):
 			)
 		elif record_type.upper() == "CNAME":
 			return RecordIntent(
+				container_id="<from-etcd>",
 				container_name=owner_container_name,
 				created=created,
 				hostname=owner_hostname,

@@ -5,6 +5,7 @@ from core.record_reconciler import reconcile_records
 from interfaces.registry_interface import DnsRegistry
 from core.docker_watcher import DockerWatcher
 from core.record_builder import get_container_record_intents
+from datetime import datetime
 from logger import logger
 
 
@@ -23,7 +24,10 @@ class SyncEngine:
         if getattr(container, "_event_status", None) == "start":
             record_intents = get_container_record_intents(container)
             if record_intents:
-                self.state.upsert(container.id, record_intents, "running")
+                container_name = getattr(container, "name", "<unknown>")
+                container_created_str = container.attrs["Created"]
+                container_created = datetime.fromisoformat(container_created_str.replace("Z", "+00:00"))
+                self.state.upsert(container.id, container_name, container_created, record_intents, "running")
         else:
             self.state.mark_removed(container.id)
 

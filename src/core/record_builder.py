@@ -42,12 +42,20 @@ def get_container_record_intents(container) -> list[RecordIntent]:
 	aliased_label_pairs = {}
 
 	for label, value in labels.items():
+		if not label.startswith(prefix):
+			continue
+
 		parts = label.split(".")
+		if len(parts) < 3 and parts[1] not in ['enabled', 'force']:
+			logger.debug(f"[record_builder] Skipping malformed label: {label}")
+			continue  # too short to process - we only care about the record labels, which will have 3 or 4 parts
+
 		type = parts[1]
 
 		if type not in allowed_record_types:
-			logger.error(f"[record_builder] Unsupported record type {type}")
-			continue
+			if type != "enabled":  # skip known non-record labels silently
+				logger.warning(f"[record_builder] Skipping unknown or unsupported record type '{type}' from label '{label}'")
+				continue
 
 		if len(parts) == 3 and parts[0] == prefix and parts[2] in {"name", "value"}:
 			# Format 1 (base): prefix.type.key(name|value)
@@ -135,7 +143,7 @@ def get_container_record_intents(container) -> list[RecordIntent]:
 
 	# Handle aliased label pairs next
 	if "A" in aliased_label_pairs:
-		for alias, pair in aliased_label_pairs["A"]:
+		for alias, pair in aliased_label_pairs["A"].items():
 			if "name" in pair:
 				name = pair["name"]
 				if "value" in pair:
@@ -163,10 +171,10 @@ def get_container_record_intents(container) -> list[RecordIntent]:
 			elif "value" in pair:
 				logger.error(f"[record_builder] {prefix}.A.value={pair['value']} label found with no matching {prefix}.A.name pair.")
 	if "CNAME" in aliased_label_pairs:
-		for alias, pair in aliased_label_pairs["CNAME"]:
+		for alias, pair in aliased_label_pairs["CNAME"].items():
 			if "name" in pair and "value" in pair:
-				name = base_label_pairs["CNAME"]["name"]
-				value = base_label_pairs["CNAME"]["value"]
+				name = pair["name"]
+				value = pair["value"]
 				try:
 					force = _get_force(labels=labels, container_force_label=container_force_label, record_force_label=f"{prefix}.CNAME.{alias}.force")
 					record_intents.append(
