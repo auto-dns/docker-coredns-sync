@@ -49,7 +49,7 @@ class DockerWatcher:
 				try:
 					container = self._safe_get_container(container_id)
 					if container:
-						container.status = status
+						container._event_status = status
 						callback(container)
 				except Exception as e:
 					logger.debug(f"[docker_watcher] Could not inspect container {container_id}: {e}")

@@ -20,7 +20,7 @@ class SyncEngine:
         if not container:
             return
 
-        if container.status == "running":
+        if getattr(container, "_event_status", None) == "start":
             record_intents = get_container_record_intents(container)
             if record_intents:
                 self.state.upsert(container.id, record_intents, "running")
