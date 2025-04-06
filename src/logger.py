@@ -1,5 +1,5 @@
 import logging
-from src.config import load_settings
+from config import load_settings
 
 
 def setup_logger() -> logging.Logger:

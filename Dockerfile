@@ -36,4 +36,4 @@ CMD ["sleep", "infinity"]
 
 
 FROM base AS release
-CMD ["python", "-m", "src.main"]
+CMD ["python", "-m", "main"]

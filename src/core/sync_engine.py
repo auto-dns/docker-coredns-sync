@@ -14,6 +14,7 @@ class SyncEngine:
         self.poll_interval = poll_interval
         self.state = StateTracker()
         self.watcher = DockerWatcher()
+        self.running = False
 
     def handle_event(self, container):
         if not container:
@@ -27,9 +28,10 @@ class SyncEngine:
             self.state.mark_removed(container.id)
 
     def run(self):
+        self.running = True
         self.watcher.subscribe(self.handle_event)
 
-        while True:
+        while self.running:
             try:
                 # Fetch the current state (local docker container record_intents, remote etcd record_intents)
                 actual_record_intents = self.registry.list()
@@ -61,3 +63,8 @@ class SyncEngine:
                 logger.error(f"[sync_engine] Sync error: {e}")
 
             time.sleep(self.poll_interval)
+
+    def stop(self):
+        self.running = False
+        self.watcher.stop()
+        logger.info("[sync_engine] Graceful shutdown initiated.")

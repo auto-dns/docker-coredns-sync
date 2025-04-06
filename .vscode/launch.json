@@ -2,10 +2,10 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: src.main",
+            "name": "Python Debugger: main",
             "type": "debugpy",
             "request": "launch",
-            "module": "src.main",
+            "module": "main",
             "justMyCode": true,
             "console": "integratedTerminal",
             "envFile": "${workspaceFolder}/.devcontainer/.env"
