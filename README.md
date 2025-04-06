@@ -131,7 +131,7 @@ Install dependencies and run:
 
 ```bash
 pip install -r requirements.txt
-python3 -m src.main
+python3 -m main
 ```
 
 The sync script:
