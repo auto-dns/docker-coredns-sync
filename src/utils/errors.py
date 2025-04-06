@@ -16,6 +16,10 @@ class RegistryUnsupportedRecordTypeError(ValueError):
 class RegistryParseError(ValueError):
     """Raised when a registry entry can't be parsed correctly."""
 
+# Reconciler
+class OwnershipConflictError(Exception):
+    """Raised when the reconciler detects an attempt to overwrite a record where ownership does not permit"""
+
 # Record Validator
 class RecordValidationError(ValueError):
     """Raised when a new record creates a conflicting DNS state"""

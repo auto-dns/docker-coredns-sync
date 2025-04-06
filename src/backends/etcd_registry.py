@@ -3,9 +3,11 @@ import json
 import time
 from typing import List
 from contextlib import contextmanager
+from datetime import datetime
 
 from config import load_settings
 from core.dns_record import Record, ARecord, CNAMERecord
+from core.record_intent import RecordIntent
 from interfaces.registry_with_lock import RegistryWithLock
 from logger import logger
 from utils.errors import (
@@ -24,25 +26,25 @@ class EtcdRegistry(RegistryWithLock):
 		except Exception as e:
 			raise EtcdConnectionError(f"Failed to connect to etcd: {e}")
 
-	def register(self, record: Record) -> None:
-		key = self._get_etcd_key(record)
-		value = self._get_etcd_value(record)
+	def register(self, record_intent: RecordIntent) -> None:
+		key = self._get_etcd_key(record_intent)
+		value = self._get_etcd_value(record_intent)
 		self.client.put(key, value)
 
-	def remove(self, record: Record) -> None:
-		key = self._get_etcd_key(record)
+	def remove(self, record_intent: RecordIntent) -> None:
+		key = self._get_etcd_key(record_intent)
 		self.client.delete(key)
 
-	def list(self) -> List[Record]:
+	def list(self) -> List[RecordIntent]:
 		prefix = settings.etcd_path_prefix
-		records = []
+		record_intents = []
 		for value, meta in self.client.get_prefix(prefix):
 			try:
-				record = self._parse_etcd_value(meta.key.decode(), value.decode())
-				records.append(record)
+				record_intent = self._parse_etcd_value(meta.key.decode(), value.decode())
+				record_intents.append(record_intent)
 			except Exception as e:
 				logger.error(f"[etcd_registry] Failed to parse key: {meta.key}: {e}")
-		return records
+		return record_intents
 
 	@contextmanager
 	def lock_transaction(self, keys: str | list[str]):
@@ -85,21 +87,23 @@ class EtcdRegistry(RegistryWithLock):
 				except Exception:
 					pass
 
-	def _get_etcd_key(self, record: Record) -> str:
+	def _get_etcd_key(self, record_intent: RecordIntent) -> str:
 		# Format: ***REMOVED***/api
-		parts = record.name.strip(".").split(".")[::-1]
+		parts = record_intent.record.name.strip(".").split(".")[::-1]
 		return f"{settings.etcd_path_prefix}/{'/'.join(parts)}"
 
-	def _get_etcd_value(self, record: Record) -> str:
-		if isinstance(record, (ARecord, CNAMERecord)):
+	def _get_etcd_value(self, record_intent: RecordIntent) -> str:
+		if isinstance(record_intent, (ARecord, CNAMERecord)):
 			return json.dumps({
-				"host": str(record.value),
-				"record_type": record.record_type,
-				"owner": record.owner,
+				"host": str(record_intent.record.value),
+				"record_type": record_intent.record.record_type,
+				"owner_hostname": record_intent.hostname,
+				"owner_container_name": record_intent.container_name,
+				"created": record_intent.created,
 			})
-		raise RegistryUnsupportedRecordTypeError(f"Unsupported record type: {record.record_type}")
+		raise RegistryUnsupportedRecordTypeError(f"Unsupported record type: {record_intent.record.record_type}")
 
-	def _parse_etcd_value(self, key: str, value: str) -> Record:
+	def _parse_etcd_value(self, key: str, value: str) -> RecordIntent:
 		# TODO: Remove these if we run the code and don't get circular import errors
 		# from core.dns_record import ARecord, CNAMERecord  # avoid circular import
 		# from utils.errors import RegistryParseError
@@ -111,14 +115,33 @@ class EtcdRegistry(RegistryWithLock):
 		data = json.loads(value)
 		record_type = data.get("record_type")
 		host = data.get("host")
-		owner = data.get("owner")
+		owner_hostname = data.get("owner_hostname")
+		owner_container_name = data.get("owner_container_name")
+		created_str = data.get("created")
+		created = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
 
-		if not record_type or not host or not owner:
+		if not record_type or not host:
 			raise RegistryParseError(f"Missing required fields in etcd record: {data}")
 
 		if record_type.upper() == "A":
-			return ARecord(name=name, value=host, owner=owner)
+			return RecordIntent(
+				container_name=owner_container_name,
+				created=created,
+				hostname=owner_hostname,
+				record=ARecord(
+					name=name,
+					value=host,
+				),
+			)
 		elif record_type.upper() == "CNAME":
-			return CNAMERecord(name=name, value=host, owner=owner)
+			return RecordIntent(
+				container_name=owner_container_name,
+				created=created,
+				hostname=owner_hostname,
+				record=CNAMERecord(
+					name=name,
+					value=host,
+				)
+			)
 
 		raise RegistryUnsupportedRecordTypeError(f"Unknown record type: {record_type}")

@@ -11,7 +11,8 @@ src/
 │   ├── __init__.py
 │   ├── dns_record.py         # ARecord, CNAMERecord, base Record model
 │   ├── docker_watcher.py     # Listens for Docker events
-│   ├── record_builder.py     # Converts container labels → Record[]
+│   ├── record_builder.py     # Converts container labels → RecordIntent[]
+│   ├── record_intent.py      # RecordIntent model
 │   ├── record_reconciler.py  # Diffs desired vs actual, decides what to change
 │   ├── record_validator.py   # Enforces DNS rules (e.g. no CNAME cycles)
 │   ├── state.py              # (optional) Tracks active containers, deduping, etc
@@ -59,3 +60,20 @@ src/
 | `errors.py` | Custom exceptions for clean error handling |
 | `docker_watcher.py` | Subscribes to Docker events (start/stop/etc) |
 | `docker_utils.py` _(optional)_ | Helps with safe container inspection or label parsing |
+
+
+# State plus sync
+
+We’ll build a system like this:
+
+🧠 state.py
+	•	Tracks containers that are seen and their current state (running, exited, etc.)
+	•	Keeps the latest relevant metadata (e.g. derived DNS records)
+	•	Optionally tracks timestamps to handle TTL and debounce logic
+
+⚙️ sync_engine.py
+	•	Runs in a loop every X seconds (e.g. 5 seconds)
+	•	Pulls registry records (registry.list())
+	•	Asks state.py for current desired records
+	•	Diffs current vs desired → runs validator → applies changes
+

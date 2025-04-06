@@ -1,12 +1,15 @@
+from datetime import datetime
 import time
 from typing import Dict, List
-from core.dns_record import Record
+from core.record_intent import RecordIntent
 
 
 class ContainerState:
-    def __init__(self, container_id: str, records: List[Record], status: str):
+    def __init__(self, container_id: str, container_name: str, container_created: datetime, record_intents: List[RecordIntent], status: str):
         self.container_id = container_id
-        self.records = records
+        self.container_name = container_name
+        self.container_created = container_created
+        self.record_intents = record_intents
         self.status = status  # "running", "removed"
         self.last_updated = time.time()
 
@@ -18,19 +21,19 @@ class StateTracker:
     def __init__(self):
         self._containers: Dict[str, ContainerState] = {}
 
-    def upsert(self, container_id: str, records: List[Record], status: str):
-        self._containers[container_id] = ContainerState(container_id, records, status)
+    def upsert(self, container_id: str, container_name: str, container_created: datetime, record_intents: List[RecordIntent], status: str):
+        self._containers[container_id] = ContainerState(container_id, container_name, container_created, record_intents, status)
 
     def mark_removed(self, container_id: str):
         if container_id in self._containers:
             self._containers[container_id].status = "removed"
             self._containers[container_id].last_updated = time.time()
 
-    def get_all_desired_records(self) -> List[Record]:
+    def get_all_desired_record_intents(self) -> List[RecordIntent]:
         result = []
         for state in self._containers.values():
             if state.status == "running":
-                result.extend(state.records)
+                result.extend(state.record_intents)
         return result
 
     def remove_stale(self, ttl: float = 60.0):

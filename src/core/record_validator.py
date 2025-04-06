@@ -1,9 +1,11 @@
 from core.dns_record import Record, ARecord, CNAMERecord
+from core.record_intent import RecordIntent
 from utils.errors import RecordValidationError
 from typing import Iterable
+from logger import logger
 
 
-def validate_record(new_record: Record, existing_records: Iterable[Record]) -> None:
+def validate_record(new_record_intent: RecordIntent, existing_record_intents: Iterable[RecordIntent]) -> None:
 	"""
 	Validates a proposed DNS record against the current known records.
 
@@ -13,6 +15,9 @@ def validate_record(new_record: Record, existing_records: Iterable[Record]) -> N
 	3. A records with the same IP are disallowed for the same name.
 	4. CNAMEs may not form resolution cycles.
 	"""
+	new_record = new_record_intent.record
+	existing_records = [r.record for r in existing_record_intents]
+
 	same_name_records = [r for r in existing_records if r.name == new_record.name]
 	a_records = [r for r in same_name_records if isinstance(r, ARecord)]
 	cname_records = [r for r in same_name_records if isinstance(r, CNAMERecord)]
@@ -40,8 +45,17 @@ def validate_record(new_record: Record, existing_records: Iterable[Record]) -> N
 
 	# Rule 4: Detect cycles
 	if isinstance(new_record, CNAMERecord):
-		forward_map = {r.name: r.value for r in existing_records if isinstance(r, CNAMERecord)}
+		# Construct forwarding map
+		forward_map = {}
+		for r in existing_record_intents:
+			if isinstance(r, CNAMERecord):
+				if r.name in forward_map:
+					logger.warning(f"Duplicate CNAME definitions detected in remote registry for domain {r.name}")
+					continue
+			forward_map[r.name] = r.value
+		# Add new record to forwarding map
 		forward_map[new_record.name] = new_record.value
+		# Process to detect loops
 		seen = set()
 		node = new_record.name
 		while node in forward_map:
