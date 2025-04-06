@@ -20,9 +20,9 @@ class SyncEngine:
             return
 
         if container.status == "running":
-            records = build_records_from_container(container)
-            if records:
-                self.state.upsert(container.id, records, "running")
+            record_intents = build_records_from_container(container)
+            if record_intents:
+                self.state.upsert(container.id, record_intents, "running")
         else:
             self.state.mark_removed(container.id)
 
@@ -31,21 +31,22 @@ class SyncEngine:
 
         while True:
             try:
-                # Fetch the current state (local docker container records, remote etcd records)
-                actual_records = self.registry.list()
-                desired_records = self.state.get_all_desired_records()
+                # Fetch the current state (local docker container record_intents, remote etcd record_intents)
+                actual_record_intents = self.registry.list()
+                desired_record_intents = self.state.get_all_desired_record_intents()
 
                 # Step 1: Reconcile — compute records to add/remove
-                to_add, to_remove = reconcile_records(desired_records, actual_records)
+                to_add, to_remove = reconcile_records(desired_record_intents, actual_record_intents)
 
                 # Step 2: Validate adds individually
                 valid_adds = []
-                for record in to_add:
+                for record_intent in to_add:
                     try:
-                        validate_record(record, actual_records + valid_adds)
-                        valid_adds.append(record)
+                        validate_record(record_intent, actual_record_intents + valid_adds)
+                        valid_adds.append(record_intent)
                     except Exception as e:
-                        logger.warning(f"[validator] Skipping invalid record {record.render()} — {e}")
+                        # TODO: should I create a render function for the record intent and just call that? Or does it already have a render function from pydantic?
+                        logger.warning(f"[validator] Skipping invalid record {record_intent.record.render()} — {e}")
 
                 # Step 3: Apply — remove first, then add
                 for r in to_remove:

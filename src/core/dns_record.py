@@ -12,12 +12,11 @@ def is_valid_hostname(hostname: str) -> bool:
 
 class DnsRecord(BaseModel):
     name: str
-    owner: str
     record_type: str
     value: str
 
     def render(self) -> str:
-        return f"{self.record_type}: {self.name} -> {self.value} ({self.owner})"
+        return f"{self.name} -> {self.value}"
 
     model_config = {
         "frozen": True,  # like dataclasses' frozen=True
@@ -28,6 +27,9 @@ class DnsRecord(BaseModel):
 class ARecord(DnsRecord):
     record_type: str = Field(default="A", frozen=True)
     value: IPvAnyAddress
+
+    def render(self) -> str:
+        return f"A: {self.name} -> {self.value}"
 
     @field_validator("name")
     @classmethod
