@@ -15,3 +15,7 @@ class RegistryUnsupportedRecordTypeError(ValueError):
 
 class RegistryParseError(ValueError):
     """Raised when a registry entry can't be parsed correctly."""
+
+# Record Validator
+class RecordValidationError(ValueError):
+    """Raised when a new record creates a conflicting DNS state"""
