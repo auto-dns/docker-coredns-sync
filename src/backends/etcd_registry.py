@@ -1,7 +1,7 @@
 import etcd3
 import json
 import time
-from typing import List
+from typing import List, Union
 from contextlib import contextmanager
 from datetime import datetime
 
@@ -47,7 +47,7 @@ class EtcdRegistry(RegistryWithLock):
 		return record_intents
 
 	@contextmanager
-	def lock_transaction(self, keys: str | list[str]):
+	def lock_transaction(self, keys: Union[str, List[str]]):
 		if isinstance(keys, str):
 			keys = [keys]  # Backward-compatible
 

@@ -45,6 +45,6 @@ services:
     container_name: coredns
     command: -conf /etc/coredns/Corefile
     volumes:
-      - ../coredns:/etc/coredns:ro
+      - ./coredns:/etc/coredns:ro
     ports:
       - "5336:5336/udp"
