@@ -39,18 +39,27 @@ def reconcile_records(
 			to_add.append(desired_r)
 		else:
 			if existing_r.hostname == desired_r.hostname and existing_r.container_name == desired_r.container_name:
-				logger.debug(...)
+				logger.debug(
+					f"[reconciler] Skipping record already owned by us: "
+					f"{desired_r.record.render()} (container: {desired_r.container_name})"
+				)
 				continue
 			elif desired_r.force:
-				logger.info(...)
+				logger.info(
+					f"[reconciler] Forcibly overriding record owned by {existing_r.hostname}/{existing_r.container_name}: "
+					f"{desired_r.record.render()}"
+				)
 				to_remove.append(existing_r)
 				to_add.append(desired_r)
 			elif desired_r.created < existing_r.created:
-				logger.info(...)  # override by age
+				logger.info(
+					f"[reconciler] Overriding newer record owned by {existing_r.hostname}/{existing_r.container_name} "
+					f"with older desired record: {desired_r.record.render()}"
+				)
 				to_remove.append(existing_r)
 				to_add.append(desired_r)
 			else:
-				logger.warning(  # conflict, no override
+				logger.warning(
 					f"[reconciler] Record conflict (not overriding): "
 					f"{desired_r.record.render()} already owned by {existing_r.hostname}/{existing_r.container_name}"
 				)
