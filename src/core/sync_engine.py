@@ -1,11 +1,12 @@
 import time
-from core.state import StateTracker
-from core.record_validator import validate_record
-from core.record_reconciler import reconcile_records
-from interfaces.registry_interface import DnsRegistry
+from core.container_event import ContainerEvent
 from core.docker_watcher import DockerWatcher
 from core.record_builder import get_container_record_intents
+from core.record_reconciler import reconcile_records
+from core.record_validator import validate_record
+from core.state import StateTracker
 from datetime import datetime
+from interfaces.registry_interface import DnsRegistry
 from logger import logger
 
 
@@ -17,19 +18,22 @@ class SyncEngine:
         self.watcher = DockerWatcher()
         self.running = False
 
-    def handle_event(self, container):
-        if not container:
+    def handle_event(self, event: ContainerEvent):
+        if not event:
             return
 
-        if getattr(container, "_event_status", None) == "start":
-            record_intents = get_container_record_intents(container)
+        if event.status == "start":
+            record_intents = get_container_record_intents(event)
             if record_intents:
-                container_name = getattr(container, "name", "<unknown>")
-                container_created_str = container.attrs["Created"]
-                container_created = datetime.fromisoformat(container_created_str.replace("Z", "+00:00"))
-                self.state.upsert(container.id, container_name, container_created, record_intents, "running")
+                self.state.upsert(
+                    container_id=event.id,
+                    container_name=event.name,
+                    container_created=event.created,
+                    record_intents=record_intents,
+                    status="running",
+                )
         else:
-            self.state.mark_removed(container.id)
+            self.state.mark_removed(event.id)
 
     def run(self):
         self.running = True
