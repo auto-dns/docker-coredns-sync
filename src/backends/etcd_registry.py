@@ -26,14 +26,49 @@ class EtcdRegistry(RegistryWithLock):
 		except Exception as e:
 			raise EtcdConnectionError(f"Failed to connect to etcd: {e}")
 
+	def _get_next_indexed_key(self, fqdn: str) -> str:
+		parts = fqdn.strip(".").split(".")[::-1]
+		base_key = f"{settings.etcd_path_prefix}/{'/'.join(parts)}"
+		existing_indices = set()
+		for _, meta in self.client.get_prefix(base_key):
+			key = meta.key.decode()
+			suffix = key.rsplit("/", 1)[-1]
+			if suffix.startswith("x"):
+				try:
+					existing_indices.add(int(suffix[1:]))
+				except ValueError:
+					continue
+		index = 1
+		while index in existing_indices:
+			index += 1
+		return f"{base_key}/x{index}"
+
 	def register(self, record_intent: RecordIntent) -> None:
-		key = self._get_etcd_key(record_intent)
+		fqdn = record_intent.record.name
+		key = self._get_next_indexed_key(fqdn)
 		value = self._get_etcd_value(record_intent)
 		self.client.put(key, value)
 
 	def remove(self, record_intent: RecordIntent) -> None:
-		key = self._get_etcd_key(record_intent)
-		self.client.delete(key)
+		fqdn = record_intent.record.name
+		parts = fqdn.strip(".").split(".")[::-1]
+		base_key = f"{settings.etcd_path_prefix}/{'/'.join(parts)}"
+
+		for value, meta in self.client.get_prefix(base_key):
+			key = meta.key.decode()
+			try:
+				existing = json.loads(value)
+				if (
+					existing.get("host") == str(record_intent.record.value)
+					and existing.get("record_type") == record_intent.record.record_type
+					and existing.get("owner_hostname") == record_intent.hostname
+					and existing.get("owner_container_name") == record_intent.container_name
+				):
+					self.client.delete(key)
+					logger.info(f"[etcd_registry] Deleted key {key}")
+					return
+			except Exception as e:
+				logger.warning(f"[etcd_registry] Could not parse or match key {key}: {e}")
 
 	def list(self) -> List[RecordIntent]:
 		prefix = settings.etcd_path_prefix
