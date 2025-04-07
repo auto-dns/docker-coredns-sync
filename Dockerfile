@@ -4,12 +4,9 @@ LABEL org.opencontainers.image.source https://github.com/StevenC4/docker-coredns
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/src
-COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
-COPY src/ ./src/
-
 
 FROM base AS dev
+WORKDIR /workspace
 ARG USERNAME=vscode
 ARG USER_UID=1000
 ARG USER_GID=1000
@@ -29,11 +26,12 @@ RUN groupadd --gid $USER_GID $USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME \
     && rm -rf /var/lib/apt/lists/*
 USER $USERNAME
-WORKDIR /app
 RUN pip install debugpy
 EXPOSE 5678
 CMD ["sleep", "infinity"]
 
-
 FROM base AS release
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY src/ ./src/
 CMD ["python", "-m", "main"]

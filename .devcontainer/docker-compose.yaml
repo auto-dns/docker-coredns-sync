@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   docker-coredns-sync-dev:
     container_name: docker-coredns-sync-dev
