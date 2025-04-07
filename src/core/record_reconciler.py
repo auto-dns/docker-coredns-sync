@@ -62,14 +62,14 @@ def reconcile_additions(desired: Iterable[RecordIntent], actual: Iterable[Record
 	return to_add
 
 
-def reconcile_removals(actual: Iterable[RecordIntent], raw_desired: Iterable[RecordIntent]) -> List[RecordIntent]:
+def reconcile_removals(desired: Iterable[RecordIntent], actual: Iterable[RecordIntent]) -> List[RecordIntent]:
     logger.debug("[reconciler] Starting reconciliation removals")
 
     def record_key(r: RecordIntent) -> Tuple[str, str, str]:
         return (r.record.name, r.record.record_type, str(r.record.value))
 
     # All current raw desired keys (from this host's active containers)
-    raw_desired_keys = {record_key(r) for r in raw_desired if r.hostname == settings.hostname}
+    desired_keys = {record_key(r) for r in desired if r.hostname == settings.hostname}
 
     # Actual keys currently in etcd owned by this host
     actual_keys = {record_key(r): r for r in actual if r.hostname == settings.hostname}
@@ -77,7 +77,7 @@ def reconcile_removals(actual: Iterable[RecordIntent], raw_desired: Iterable[Rec
     # Only delete actual records if:
     # - they are owned by this host
     # - and they are NOT claimed by any currently-running container
-    to_remove = [r for key, r in actual_keys.items() if key not in raw_desired_keys]
+    to_remove = [r for key, r in actual_keys.items() if key not in desired_keys]
 
     for r in to_remove:
         logger.info(f"[reconciler] Removing stale record no longer owned by this host: {r.record.render()}")
