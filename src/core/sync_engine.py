@@ -1,14 +1,15 @@
 import time
+from config import load_settings
 from core.container_event import ContainerEvent
 from core.docker_watcher import DockerWatcher
 from core.record_builder import get_container_record_intents
-from core.record_reconciler import reconcile_records
+from core.record_reconciler import reconcile_additions, reconcile_removals
 from core.record_validator import validate_record
 from core.state import StateTracker
-from datetime import datetime
 from interfaces.registry_interface import DnsRegistry
 from logger import logger
 
+settings = load_settings()
 
 class SyncEngine:
     def __init__(self, registry: DnsRegistry, poll_interval: float = 5.0):
@@ -44,9 +45,9 @@ class SyncEngine:
                 # Fetch the current state (local docker container record_intents, remote etcd record_intents)
                 actual_record_intents = self.registry.list()
                 desired_record_intents = self.state.get_all_desired_record_intents()
-
+                
                 # Step 1: Reconcile — compute records to add/remove
-                to_add, to_remove = reconcile_records(desired_record_intents, actual_record_intents)
+                to_add = reconcile_additions(desired_record_intents, actual_record_intents)
 
                 # Step 2: Validate adds individually
                 valid_adds = []
@@ -58,13 +59,16 @@ class SyncEngine:
                         # TODO: should I create a render function for the record intent and just call that? Or does it already have a render function from pydantic?
                         logger.warning(f"[validator] Skipping invalid record {record_intent.record.render()} — {e}")
 
-                # Step 3: Apply — remove first, then add
+                # Step 3: Recompute stale records using only valid desired intents
+                to_remove = reconcile_removals(desired_record_intents, actual_record_intents)
+
+                # Step 4: Apply - remove first, then add
                 for r in to_remove:
                     self.registry.remove(r)
                 for r in valid_adds:
                     self.registry.register(r)
-
-                # Step 4: Expire stale containers
+                
+                # Step 5: Expire stale containers from memory
                 self.state.remove_stale(ttl=60)
 
             except Exception as e:

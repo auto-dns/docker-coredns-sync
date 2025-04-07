@@ -47,7 +47,7 @@ def validate_record(new_record_intent: RecordIntent, existing_record_intents: It
 	if isinstance(new_record, CNAMERecord):
 		# Construct forwarding map
 		forward_map = {}
-		for r in existing_record_intents:
+		for r in existing_records:
 			if isinstance(r, CNAMERecord):
 				if r.name in forward_map:
 					logger.warning(f"Duplicate CNAME definitions detected in remote registry for domain {r.name}")
