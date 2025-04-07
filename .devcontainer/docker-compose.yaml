@@ -11,11 +11,6 @@ services:
       - ../:/workspace:cached
       - /var/run/docker.sock:/var/run/docker.sock
       - ../coredns:/etc/coredns:ro
-    env_file:
-      - .env
-    environment:
-      - ETCD_URL=http://etcd
-      - ETCD_PATH_PREFIX=/v2/keys/skydns
     depends_on:
       - etcd
       - coredns
