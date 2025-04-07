@@ -141,12 +141,11 @@ class EtcdRegistry(RegistryWithLock):
 			raise RegistryUnsupportedRecordTypeError(f"Unsupported record type: {record_intent.record.record_type}")
 
 	def _parse_etcd_value(self, key: str, value: str) -> RecordIntent:
-		# TODO: Remove these if we run the code and don't get circular import errors
-		# from core.dns_record import ARecord, CNAMERecord  # avoid circular import
-		# from utils.errors import RegistryParseError
-
 		path = key[len(settings.etcd_path_prefix):].lstrip("/")
-		labels = path.split("/")[::-1]
+		parts = path.split("/")
+		if parts[-1].startswith("x") and parts[-1][1:].isdigit():
+			parts = parts[:-1]  # remove xN suffix
+		labels = parts[::-1]
 		name = ".".join(labels)
 
 		data = json.loads(value)
