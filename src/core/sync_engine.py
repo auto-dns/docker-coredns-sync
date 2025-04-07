@@ -60,7 +60,7 @@ class SyncEngine:
                         logger.warning(f"[validator] Skipping invalid record {record_intent.record.render()} — {e}")
 
                 # Step 3: Recompute stale records using only valid desired intents
-                to_remove = reconcile_removals(desired_record_intents, actual_record_intents)
+                to_remove = reconcile_removals(desired_record_intents, actual_record_intents, to_add)
 
                 # Step 4: Apply - remove first, then add
                 for r in to_remove:
