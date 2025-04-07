@@ -71,7 +71,7 @@ Records are stored in etcd using SkyDNS naming format:
 
 Key:
 ```
-***REMOVED***
+***REMOVED***/foo/x1
 ```
 
 Value:

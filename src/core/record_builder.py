@@ -1,4 +1,5 @@
 from config import load_settings
+from core.container_event import ContainerEvent
 from core.dns_record import ARecord, CNAMERecord
 from core.record_intent import RecordIntent
 from datetime import datetime, timezone
@@ -14,8 +15,8 @@ def _get_force(labels, container_force_label, record_force_label):
 	return force
 
 
-def get_container_record_intents(container) -> list[RecordIntent]:
-	labels = container.labels
+def get_container_record_intents(container_event: ContainerEvent) -> list[RecordIntent]:
+	labels = container_event.labels
 	allowed_record_types = set(settings.allowed_record_types)
 	prefix = settings.docker_label_prefix
 
@@ -79,10 +80,9 @@ def get_container_record_intents(container) -> list[RecordIntent]:
 			aliased_label_pairs[type][alias][key] = value
 
 	record_intents: list[RecordIntent] = []
-	container_id = container.id
-	container_name = getattr(container, "name", "<unknown>")
-	container_created_str = container.attrs["Created"]
-	container_created = datetime.fromisoformat(container_created_str.replace("Z", "+00:00")).astimezone(timezone.utc)
+	container_id = container_event.id
+	container_name = container_event.name
+	container_created = container_event.created
 	hostname = settings.hostname
 	container_force_label = f"{prefix}.force"
 	

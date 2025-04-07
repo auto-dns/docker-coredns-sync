@@ -1,20 +1,24 @@
 # src/core/docker_watcher.py
+
+from core.container_event import ContainerEvent
 import docker
+from docker.models.containers import Container
 import threading
 import time
-from docker.models.containers import Container
-from typing import Callable
+from typing import Callable, Optional, Dict
+from datetime import datetime, timezone
 from logger import logger
 from utils.timing import retry
+
 
 class DockerWatcher:
 	def __init__(self):
 		self.client = docker.from_env()
 		self.running = True
 
-	def subscribe(self, callback: Callable[[Container], None]):
+	def subscribe(self, callback: Callable[[ContainerEvent], None]):
 		"""
-		Subscribe to Docker events and invoke the callback with the container object.
+		Subscribe to Docker events and invoke the callback with a ContainerEvent.
 		This runs in a background thread.
 		"""
 		thread = threading.Thread(target=self._watch_events, args=(callback,), daemon=True)
@@ -23,11 +27,11 @@ class DockerWatcher:
 		# Emit all currently running containers at startup
 		try:
 			for container in self.client.containers.list(filters={"status": "running"}):
-				callback(container)
+				callback(self._build_container_event(container, status="start"))
 		except Exception as e:
 			logger.warning(f"[docker_watcher] Failed to list running containers: {e}")
 
-	def _watch_events(self, callback: Callable[[Container], None]):
+	def _watch_events(self, callback: Callable[[ContainerEvent], None]):
 		"""
 		Internal loop that listens to Docker events and calls the callback.
 		"""
@@ -46,21 +50,39 @@ class DockerWatcher:
 				if status not in {"start", "die", "stop", "destroy"}:
 					continue
 
-				try:
-					container = self._safe_get_container(container_id)
-					if container:
-						container._event_status = status
-						callback(container)
-				except Exception as e:
-					logger.debug(f"[docker_watcher] Could not inspect container {container_id}: {e}")
+				if status == "start":
+					try:
+						container = self._safe_get_container(container_id)
+						callback(self._build_container_event(container, status=status))
+					except Exception as e:
+						logger.warning(f"[docker_watcher] Failed to inspect container after start: {e}")
+				else:
+					logger.debug(f"[docker_watcher] Container {container_id} {status} event — marking as removed.")
+					callback(ContainerEvent(id=container_id, status=status))  # Minimal data for stop/die
 
 		except Exception as e:
 			logger.error(f"[docker_watcher] Docker event loop error: {e}")
 			time.sleep(5)
 
 	@retry(retries=3, delay=0.5, logger_func=logger.error)
-	def _safe_get_container(self, container_id: str):
+	def _safe_get_container(self, container_id: str) -> Container:
 		return self.client.containers.get(container_id)
+
+	def _build_container_event(self, container: Container, status: str) -> ContainerEvent:
+		try:
+			created_str = container.attrs.get("Created", "")
+			created = datetime.fromisoformat(created_str.replace("Z", "+00:00")).astimezone(timezone.utc)
+		except Exception:
+			created = None
+
+		return ContainerEvent(
+			id=container.id,
+			name=getattr(container, "name", "<unknown>"),
+			created=created,
+			status=status,
+			labels=getattr(container, "labels", {}),
+			attrs=getattr(container, "attrs", {}),
+		)
 
 	def stop(self):
 		self.running = False
