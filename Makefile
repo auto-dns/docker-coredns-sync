@@ -47,7 +47,7 @@ dev-init:
 		else \
 			HOST_IP=$$(ip route get 1 | awk '{print $$NF; exit}'); \
 		fi; \
-		echo "ETCD_HOST=http://etcd" >> .devcontainer/.env; \
+		echo "ETCD_HOST=etcd" >> .devcontainer/.env; \
 		echo "HOST_IP=$$HOST_IP" > .devcontainer/.env; \
 		echo "HOSTNAME=$$(hostname)" >> .devcontainer/.env; \
 		echo "LOG_LEVEL=DEBUG" >> .devcontainer/.env; \
@@ -55,3 +55,8 @@ dev-init:
 	else \
 		echo ".devcontainer/.env already exists. Skipping."; \
 	fi
+
+ETCD_HOST=192.168.201.10
+HOST_IP=192.168.205.10
+HOSTNAME=mozart
+LOG_LEVEL=INFO
