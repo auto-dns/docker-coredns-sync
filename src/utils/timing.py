@@ -1,24 +1,24 @@
-# src/utils/timing.py
 import functools
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Tuple, TypeVar, cast
 
+F = TypeVar("F", bound=Callable[..., Any])
 
 def retry(
     retries: int = 3,
     delay: float = 0.5,
-    backoff=False,
-    backoff_ratio=2,
-    exceptions: tuple = (Exception,),
+    backoff: bool = False,
+    backoff_ratio: float = 2,
+    exceptions: Tuple[type[BaseException], ...] = (Exception,),
     logger_func: Callable[[str], None] = print,
-):
+) -> Callable[[F], F]:
     """
     A simple retry decorator with delay and optional logger.
     """
 
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: F) -> F:
         @functools.wraps(func)
-        def wrapper(*args, **kwargs) -> Any:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
             current_delay = delay
             for attempt in range(1, retries + 1):
                 try:
@@ -26,11 +26,11 @@ def retry(
                 except exceptions as e:
                     if attempt == retries:
                         raise
-                    logger_func(f"[retry] Attempt {attempt} failed: {e}. Retrying in {delay}s...")
+                    logger_func(f"[retry] Attempt {attempt} failed: {e}. Retrying in {current_delay}s...")
                     time.sleep(current_delay)
                     if backoff:
                         current_delay *= backoff_ratio
 
-        return wrapper
+        return cast(F, wrapper)
 
     return decorator

@@ -2,11 +2,11 @@
 from contextlib import AbstractContextManager
 from typing import Protocol
 
-from interfaces.registry_interface import DnsRegistry
+from src.interfaces.registry_interface import DnsRegistry
 
 
 class RegistryWithLock(DnsRegistry, Protocol):
-    def lock_transaction(self, key: str) -> AbstractContextManager:
+    def lock_transaction(self, key: str) -> AbstractContextManager[None]:
         """
         Context manager for safely coordinating a list/validate/register transaction.
 

@@ -1,13 +1,13 @@
-from config import load_settings
-from core.container_event import ContainerEvent
-from core.dns_record import ARecord, CNAMERecord
-from core.record_intent import RecordIntent
-from logger import logger
+from src.config import load_settings
+from src.core.container_event import ContainerEvent
+from src.core.dns_record import ARecord, CNAMERecord
+from src.core.record_intent import RecordIntent
+from src.logger import logger
 
 settings = load_settings()
 
 
-def _get_force(labels, container_force_label, record_force_label):
+def _get_force(labels: dict[str, str], container_force_label: str, record_force_label: str) -> bool:
     container_force = labels.get(container_force_label, "false").lower() == "true"
     record_force_label_exists = record_force_label in labels
     record_force = labels.get(record_force_label, "false").lower() == "true"
@@ -29,7 +29,8 @@ def get_container_record_intents(container_event: ContainerEvent) -> list[Record
     # coredns.A.value=target
     # ->
     # {"name": "source": "value": "target"}
-    base_label_pairs = {}
+    # base: {"A": {"name": "foo", "value": "bar"}}
+    base_label_pairs: dict[str, dict[str, str]] = {}
 
     # coredns.A.alias1.name=source
     # coredns.A.alias1.value=target
@@ -40,7 +41,7 @@ def get_container_record_intents(container_event: ContainerEvent) -> list[Record
     # 		"value": "target"
     # 	}
     # }
-    aliased_label_pairs = {}
+    aliased_label_pairs: dict[str, dict[str, dict[str, str]]] = {}
 
     for label, value in labels.items():
         if not label.startswith(prefix):

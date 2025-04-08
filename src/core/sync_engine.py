@@ -1,14 +1,16 @@
 import time
+from typing import List
 
-from config import load_settings
-from core.container_event import ContainerEvent
-from core.docker_watcher import DockerWatcher
-from core.record_builder import get_container_record_intents
-from core.record_reconciler import reconcile_additions, reconcile_removals
-from core.record_validator import validate_record
-from core.state import StateTracker
-from interfaces.registry_interface import DnsRegistry
-from logger import logger
+from src.config import load_settings
+from src.core.container_event import ContainerEvent
+from src.core.docker_watcher import DockerWatcher
+from src.core.record_builder import get_container_record_intents
+from src.core.record_intent import RecordIntent
+from src.core.record_reconciler import reconcile_additions, reconcile_removals
+from src.core.record_validator import validate_record
+from src.core.state import StateTracker
+from src.interfaces.registry_interface import DnsRegistry
+from src.logger import logger
 
 settings = load_settings()
 
@@ -21,7 +23,7 @@ class SyncEngine:
         self.watcher = DockerWatcher()
         self.running = False
 
-    def handle_event(self, event: ContainerEvent):
+    def handle_event(self, event: ContainerEvent) -> None:
         if not event:
             return
 
@@ -38,7 +40,7 @@ class SyncEngine:
         else:
             self.state.mark_removed(event.id)
 
-    def run(self):
+    def run(self) -> None:
         self.running = True
         self.watcher.subscribe(self.handle_event)
 
@@ -52,7 +54,7 @@ class SyncEngine:
                 to_add = reconcile_additions(desired_record_intents, actual_record_intents)
 
                 # Step 2: Validate adds individually
-                valid_adds = []
+                valid_adds: List[RecordIntent] = []
                 for record_intent in to_add:
                     try:
                         validate_record(record_intent, actual_record_intents + valid_adds)
@@ -82,7 +84,7 @@ class SyncEngine:
 
             time.sleep(self.poll_interval)
 
-    def stop(self):
+    def stop(self) -> None:
         self.running = False
         self.watcher.stop()
         logger.info("[sync_engine] Graceful shutdown initiated.")

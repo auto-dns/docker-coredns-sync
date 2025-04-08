@@ -16,12 +16,13 @@ target-version = ["py311"]
 
 [tool.ruff]
 line-length = 100
-src = ["src", "tests"]
+src = ["src", "tests"] 
 select = ["E", "F", "B", "I"]
 ignore = ["E501"]  # Ignore long lines, optional
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
+namespace_packages = true
 mypy_path = "src"
-files = ["src", "tests"]
+ignore_missing_imports = true

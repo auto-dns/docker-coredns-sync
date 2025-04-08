@@ -1,9 +1,9 @@
 from typing import Iterable
 
-from core.dns_record import ARecord, CNAMERecord
-from core.record_intent import RecordIntent
-from logger import logger
-from utils.errors import RecordValidationError
+from src.core.dns_record import ARecord, CNAMERecord
+from src.core.record_intent import RecordIntent
+from src.logger import logger
+from src.utils.errors import RecordValidationError
 
 
 def validate_record(
@@ -57,7 +57,7 @@ def validate_record(
     # Rule 4: Detect cycles
     if isinstance(new_record, CNAMERecord):
         # Construct forwarding map
-        forward_map = {}
+        forward_map: dict[str, str] = {}
         for r in existing_records:
             if isinstance(r, CNAMERecord):
                 if r.name in forward_map:
