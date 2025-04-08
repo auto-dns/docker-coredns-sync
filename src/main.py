@@ -1,7 +1,9 @@
 import signal
 import sys
-from core.sync_engine import SyncEngine
+
 from backends.etcd_registry import EtcdRegistry
+from core.sync_engine import SyncEngine
+
 
 def main():
     registry = EtcdRegistry()

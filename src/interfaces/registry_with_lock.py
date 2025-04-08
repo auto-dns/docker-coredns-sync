@@ -1,6 +1,7 @@
 # src/interfaces/registry_with_lock.py
-from typing import Protocol
 from contextlib import AbstractContextManager
+from typing import Protocol
+
 from interfaces.registry_interface import DnsRegistry
 
 

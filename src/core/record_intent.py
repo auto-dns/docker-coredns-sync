@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
+
 from pydantic import BaseModel, Field
+
 from core.dns_record import Record
+
 
 class RecordIntent(BaseModel):
 	container_id: str

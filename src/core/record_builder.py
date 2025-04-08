@@ -1,8 +1,8 @@
+
 from config import load_settings
 from core.container_event import ContainerEvent
 from core.dns_record import ARecord, CNAMERecord
 from core.record_intent import RecordIntent
-from datetime import datetime, timezone
 from logger import logger
 
 settings = load_settings()

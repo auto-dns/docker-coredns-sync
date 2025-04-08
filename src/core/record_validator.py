@@ -1,8 +1,9 @@
-from core.dns_record import Record, ARecord, CNAMERecord
-from core.record_intent import RecordIntent
-from utils.errors import RecordValidationError
 from typing import Iterable
+
+from core.dns_record import ARecord, CNAMERecord
+from core.record_intent import RecordIntent
 from logger import logger
+from utils.errors import RecordValidationError
 
 
 def validate_record(new_record_intent: RecordIntent, existing_record_intents: Iterable[RecordIntent]) -> None:
