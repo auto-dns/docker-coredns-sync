@@ -2,7 +2,7 @@ import time
 from datetime import datetime
 from typing import Dict, List
 
-from core.record_intent import RecordIntent
+from src.core.record_intent import RecordIntent
 
 
 class ContainerState:
@@ -26,7 +26,7 @@ class ContainerState:
 
 
 class StateTracker:
-    def __init__(self):
+    def __init__(self) -> None:
         self._containers: Dict[str, ContainerState] = {}
 
     def upsert(
@@ -36,12 +36,12 @@ class StateTracker:
         container_created: datetime,
         record_intents: List[RecordIntent],
         status: str,
-    ):
+    ) -> None:
         self._containers[container_id] = ContainerState(
             container_id, container_name, container_created, record_intents, status
         )
 
-    def mark_removed(self, container_id: str):
+    def mark_removed(self, container_id: str) -> None:
         if container_id in self._containers:
             self._containers[container_id].status = "removed"
             self._containers[container_id].last_updated = time.time()
@@ -53,7 +53,7 @@ class StateTracker:
                 result.extend(state.record_intents)
         return result
 
-    def remove_stale(self, ttl: float = 60.0):
+    def remove_stale(self, ttl: float = 60.0) -> None:
         expired = [cid for cid, state in self._containers.items() if state.is_stale(ttl)]
         for cid in expired:
             del self._containers[cid]

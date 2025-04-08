@@ -2,22 +2,26 @@ import json
 import time
 from contextlib import contextmanager
 from datetime import datetime
-from typing import List, Union
+from typing import Iterator, List, Union
 
 import etcd3
 
-from config import load_settings
-from core.dns_record import ARecord, CNAMERecord
-from core.record_intent import RecordIntent
-from interfaces.registry_with_lock import RegistryWithLock
-from logger import logger
-from utils.errors import EtcdConnectionError, RegistryParseError, RegistryUnsupportedRecordTypeError
+from src.config import load_settings
+from src.core.dns_record import ARecord, CNAMERecord
+from src.core.record_intent import RecordIntent
+from src.interfaces.registry_with_lock import RegistryWithLock
+from src.logger import logger
+from src.utils.errors import (
+    EtcdConnectionError,
+    RegistryParseError,
+    RegistryUnsupportedRecordTypeError,
+)
 
 settings = load_settings()
 
 
 class EtcdRegistry(RegistryWithLock):
-    def __init__(self):
+    def __init__(self) -> None:
         try:
             self.client = etcd3.client(host=settings.etcd_host, port=settings.etcd_port)
         except Exception as e:
@@ -79,7 +83,7 @@ class EtcdRegistry(RegistryWithLock):
         return record_intents
 
     @contextmanager
-    def lock_transaction(self, keys: Union[str, List[str]]):
+    def lock_transaction(self, keys: Union[str, List[str]]) -> Iterator[None]:
         if isinstance(keys, str):
             keys = [keys]  # Backward-compatible
 
