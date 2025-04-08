@@ -1,5 +1,7 @@
-from core.dns_record import Record
 from typing import Protocol
+
+from core.dns_record import Record
+
 
 class DnsRegistry(Protocol):
     def register(self, record: Record): ...

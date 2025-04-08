@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field, IPvAnyAddress, field_validator
-from typing import Union
 import re
+from typing import Union
+
+from pydantic import BaseModel, Field, IPvAnyAddress, field_validator
 
 
 def is_valid_hostname(hostname: str) -> bool:

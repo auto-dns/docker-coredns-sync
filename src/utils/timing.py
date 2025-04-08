@@ -1,7 +1,7 @@
 # src/utils/timing.py
-import time
 import functools
-from typing import Callable, Any
+import time
+from typing import Any, Callable
 
 
 def retry(retries: int = 3, delay: float = 0.5, backoff = False, backoff_ratio = 2, exceptions: tuple = (Exception,), logger_func: Callable[[str], None] = print):
