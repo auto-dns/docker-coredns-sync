@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field, IPvAnyAddress, field_validator
 def is_valid_hostname(hostname: str) -> bool:
     if len(hostname) > 255:
         return False
-    pattern = r"^(?=.{1,255}$)[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9\-]{1,63})*$"
+    pattern = (
+        r"^(?=.{1,255}$)[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9\-]{1,63})*$"
+    )
     return re.match(pattern, hostname) is not None
 
 
@@ -21,7 +23,7 @@ class DnsRecord(BaseModel):
 
     model_config = {
         "frozen": True,  # like dataclasses' frozen=True
-        "extra": "forbid"  # prevent unknown fields
+        "extra": "forbid",  # prevent unknown fields
     }
 
 

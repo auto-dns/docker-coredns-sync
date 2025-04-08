@@ -8,22 +8,20 @@ settings = load_settings()
 
 
 def _intent_key(intent: RecordIntent) -> Tuple[str, str, str]:
-	"""Create a deduplication key based on record name, type, and value."""
-	return (intent.record.name, intent.record.record_type, str(intent.record.value))
+    """Create a deduplication key based on record name, type, and value."""
+    return (intent.record.name, intent.record.record_type, str(intent.record.value))
 
 
-def reconcile_additions(desired: Iterable[RecordIntent], actual: Iterable[RecordIntent]) -> List[RecordIntent]:
+def reconcile_additions(
+    desired: Iterable[RecordIntent], actual: Iterable[RecordIntent]
+) -> List[RecordIntent]:
     """
     Compares desired vs actual state and returns record intents to add.
     """
     logger.debug("[reconciler] Starting reconciliation additions")
 
-    desired_by_key: Dict[Tuple[str, str, str], RecordIntent] = {
-        _intent_key(r): r for r in desired
-    }
-    actual_by_key: Dict[Tuple[str, str, str], RecordIntent] = {
-        _intent_key(r): r for r in actual
-    }
+    desired_by_key: Dict[Tuple[str, str, str], RecordIntent] = {_intent_key(r): r for r in desired}
+    actual_by_key: Dict[Tuple[str, str, str], RecordIntent] = {_intent_key(r): r for r in actual}
 
     to_add: List[RecordIntent] = []
 
@@ -36,7 +34,10 @@ def reconcile_additions(desired: Iterable[RecordIntent], actual: Iterable[Record
                 f"(owned by {desired_r.hostname}/{desired_r.container_name})"
             )
             to_add.append(desired_r)
-        elif existing_r.hostname == desired_r.hostname and existing_r.container_name == desired_r.container_name:
+        elif (
+            existing_r.hostname == desired_r.hostname
+            and existing_r.container_name == desired_r.container_name
+        ):
             logger.debug(
                 f"[reconciler] Skipping record already owned by us: "
                 f"{desired_r.record.render()} (container: {desired_r.container_name})"
@@ -70,9 +71,7 @@ def reconcile_additions(desired: Iterable[RecordIntent], actual: Iterable[Record
 
 
 def reconcile_removals(
-    desired: Iterable[RecordIntent],
-    actual: Iterable[RecordIntent],
-    to_add: Iterable[RecordIntent]
+    desired: Iterable[RecordIntent], actual: Iterable[RecordIntent], to_add: Iterable[RecordIntent]
 ) -> List[RecordIntent]:
     logger.debug("[reconciler] Starting reconciliation removals")
 
@@ -86,11 +85,14 @@ def reconcile_removals(
     # - they are owned by us
     # - and not present in either the desired or to_add list
     to_remove = [
-        r for r in actual
+        r
+        for r in actual
         if r.hostname == settings.hostname and record_key(r) not in desired_keys | add_keys
     ]
 
     for r in to_remove:
-        logger.info(f"[reconciler] Removing stale record no longer owned by this host: {r.record.render()}")
+        logger.info(
+            f"[reconciler] Removing stale record no longer owned by this host: {r.record.render()}"
+        )
 
     return to_remove

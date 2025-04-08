@@ -6,7 +6,14 @@ from core.record_intent import RecordIntent
 
 
 class ContainerState:
-    def __init__(self, container_id: str, container_name: str, container_created: datetime, record_intents: List[RecordIntent], status: str):
+    def __init__(
+        self,
+        container_id: str,
+        container_name: str,
+        container_created: datetime,
+        record_intents: List[RecordIntent],
+        status: str,
+    ):
         self.container_id = container_id
         self.container_name = container_name
         self.container_created = container_created
@@ -22,8 +29,17 @@ class StateTracker:
     def __init__(self):
         self._containers: Dict[str, ContainerState] = {}
 
-    def upsert(self, container_id: str, container_name: str, container_created: datetime, record_intents: List[RecordIntent], status: str):
-        self._containers[container_id] = ContainerState(container_id, container_name, container_created, record_intents, status)
+    def upsert(
+        self,
+        container_id: str,
+        container_name: str,
+        container_created: datetime,
+        record_intents: List[RecordIntent],
+        status: str,
+    ):
+        self._containers[container_id] = ContainerState(
+            container_id, container_name, container_created, record_intents, status
+        )
 
     def mark_removed(self, container_id: str):
         if container_id in self._containers:

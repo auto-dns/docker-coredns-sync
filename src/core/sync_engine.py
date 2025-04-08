@@ -12,6 +12,7 @@ from logger import logger
 
 settings = load_settings()
 
+
 class SyncEngine:
     def __init__(self, registry: DnsRegistry, poll_interval: float = 5.0):
         self.registry = registry
@@ -46,7 +47,7 @@ class SyncEngine:
                 # Fetch the current state (local docker container record_intents, remote etcd record_intents)
                 actual_record_intents = self.registry.list()
                 desired_record_intents = self.state.get_all_desired_record_intents()
-                
+
                 # Step 1: Reconcile — compute records to add/remove
                 to_add = reconcile_additions(desired_record_intents, actual_record_intents)
 
@@ -58,17 +59,21 @@ class SyncEngine:
                         valid_adds.append(record_intent)
                     except Exception as e:
                         # TODO: should I create a render function for the record intent and just call that? Or does it already have a render function from pydantic?
-                        logger.warning(f"[validator] Skipping invalid record {record_intent.record.render()} — {e}")
+                        logger.warning(
+                            f"[validator] Skipping invalid record {record_intent.record.render()} — {e}"
+                        )
 
                 # Step 3: Recompute stale records using only valid desired intents
-                to_remove = reconcile_removals(desired_record_intents, actual_record_intents, to_add)
+                to_remove = reconcile_removals(
+                    desired_record_intents, actual_record_intents, to_add
+                )
 
                 # Step 4: Apply - remove first, then add
                 for r in to_remove:
                     self.registry.remove(r)
                 for r in valid_adds:
                     self.registry.register(r)
-                
+
                 # Step 5: Expire stale containers from memory
                 self.state.remove_stale(ttl=60)
 

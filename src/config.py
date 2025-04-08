@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # General
-    allowed_record_types: list = ['A', 'CNAME']
+    allowed_record_types: list = ["A", "CNAME"]
     docker_label_prefix: str = Field(default="coredns")
     host_ip: str = Field(default="127.0.0.1")
     hostname: str = Field(default="your-hostname")
@@ -18,10 +18,7 @@ class Settings(BaseSettings):
     etcd_lock_timeout: float = Field(default=2.0)
     etcd_lock_retry_interval: float = Field(default=0.1)
 
-    model_config = {
-        "env_file": ".env",  # or .devcontainer/devcontainer.env
-        "extra": "ignore"
-    }
+    model_config = {"env_file": ".env", "extra": "ignore"}  # or .devcontainer/devcontainer.env
 
 
 def load_settings() -> Settings:
