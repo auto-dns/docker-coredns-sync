@@ -11,6 +11,25 @@ def _intent_key(intent: RecordIntent) -> Tuple[str, str, str]:
     """Create a deduplication key based on record name, type, and value."""
     return (intent.record.name, intent.record.record_type, str(intent.record.value))
 
+def _record_key(intent: RecordIntent) -> Tuple[str, str, str]:
+    """Create a deduplication key based on record name, type, and value."""
+    return (intent.record.name, intent.record.record_type, str(intent.record.value))
+
+def _record_meta_key(intent: RecordIntent) -> Tuple[str, str, str]:
+    """Create a deduplication key based on record name, type, and value."""
+    return (intent.record.name, intent.record.record_type, str(intent.record.value))
+
+def reconcile(
+    desired: Iterable[RecordIntent],
+    actual: Iterable[RecordIntent]
+) -> List[RecordIntent]:
+    to_add: List[RecordIntent] = []
+    to_remove: List[RecordIntent] = []
+
+    desired_by_key: Dict[Tuple[str, str, str], RecordIntent] = {_record_key(r): r for r in desired}
+    actual_by_key: Dict[Tuple[str, str, str], RecordIntent] = {_record_key(r): r for r in actual}
+
+    return to_add, to_remove
 
 def reconcile_additions(
     desired: Iterable[RecordIntent], actual: Iterable[RecordIntent]
