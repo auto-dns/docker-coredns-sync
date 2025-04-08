@@ -26,7 +26,6 @@ RUN groupadd --gid $USER_GID $USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME \
     && rm -rf /var/lib/apt/lists/*
 USER $USERNAME
-RUN pip install debugpy
 EXPOSE 5678
 CMD ["sleep", "infinity"]
 
