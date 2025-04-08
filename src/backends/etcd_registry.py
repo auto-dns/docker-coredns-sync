@@ -21,7 +21,7 @@ class EtcdRegistry(RegistryWithLock):
         try:
             self.client = etcd3.client(host=settings.etcd_host, port=settings.etcd_port)
         except Exception as e:
-            raise EtcdConnectionError(f"Failed to connect to etcd: {e}")
+            raise EtcdConnectionError(f"Failed to connect to etcd: {e}") from e
 
     def _get_next_indexed_key(self, fqdn: str) -> str:
         parts = fqdn.strip(".").split(".")[::-1]
