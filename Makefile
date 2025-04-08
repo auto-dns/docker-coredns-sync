@@ -1,4 +1,4 @@
-.PHONY: build build-dev push up down init-env release unrelease dev-init
+.PHONY: build build-dev push up down init-env release unrelease dev-init test lint format check format-imports
 
 PROJECT_NAME := docker-coredns-sync
 IMAGE := ghcr.io/$(shell echo $(USER) | tr '[:upper:]' '[:lower:]')/$(PROJECT_NAME)
@@ -56,7 +56,17 @@ dev-init:
 		echo ".devcontainer/.env already exists. Skipping."; \
 	fi
 
-ETCD_HOST=192.168.201.10
-HOST_IP=192.168.205.10
-HOSTNAME=mozart
-LOG_LEVEL=INFO
+test:
+	pytest tests
+
+lint:
+	ruff check src tests
+	mypy src tests
+
+format:
+	black src tests
+
+check: lint test
+
+format-imports:
+	ruff format src tests
