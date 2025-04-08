@@ -1,10 +1,12 @@
+from typing import List
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     # General
-    allowed_record_types: list = ["A", "CNAME"]
+    allowed_record_types: List[str] = ["A", "CNAME"]
     docker_label_prefix: str = Field(default="coredns")
     host_ip: str = Field(default="127.0.0.1")
     hostname: str = Field(default="your-hostname")

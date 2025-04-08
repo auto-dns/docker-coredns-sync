@@ -1,14 +1,16 @@
 import re
+from ipaddress import ip_address
 from typing import Union
 
-from pydantic import BaseModel, Field, IPvAnyAddress, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 def is_valid_hostname(hostname: str) -> bool:
     if len(hostname) > 255:
         return False
     pattern = (
-        r"^(?=.{1,255}$)[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9\-]{1,63})*$"
+        r"^(?=.{1,255}$)[a-zA-Z0-9](?:[a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
+        r"(?:\.[a-zA-Z0-9\-]{1,63})*$"
     )
     return re.match(pattern, hostname) is not None
 
@@ -19,27 +21,32 @@ class DnsRecord(BaseModel):
     value: str
 
     def render(self) -> str:
-        return f"{self.name} -> {self.value}"
+        return f"{self.name} -> {getattr(self, 'value', '<no value>')}"
 
     model_config = {
-        "frozen": True,  # like dataclasses' frozen=True
-        "extra": "forbid",  # prevent unknown fields
+        "frozen": True,
+        "extra": "forbid",
     }
 
 
 class ARecord(DnsRecord):
     record_type: str = Field(default="A", frozen=True)
-    value: IPvAnyAddress
-
-    def render(self) -> str:
-        return f"A: {self.name} -> {self.value}"
 
     @field_validator("name")
     @classmethod
     def validate_hostname(cls, name: str) -> str:
         if not is_valid_hostname(name):
-            raise ValueError(f"Invalid hostname for A record: {name}")
+            raise ValueError(f"Invalid hostname for A record: {name}") from None
         return name
+
+    @field_validator("value")
+    @classmethod
+    def validate_ip(cls, value: str) -> str:
+        try:
+            ip_address(value)
+            return value
+        except ValueError:
+            raise ValueError(f"Invalid IP address: {value}") from None
 
 
 class CNAMERecord(DnsRecord):
@@ -47,9 +54,9 @@ class CNAMERecord(DnsRecord):
 
     @field_validator("name", "value")
     @classmethod
-    def validate_hostname(cls, v: str, field) -> str:
+    def validate_hostname(cls, v: str, info: ValidationInfo) -> str:
         if not is_valid_hostname(v):
-            raise ValueError(f"Invalid {field.name} for CNAME record: {v}")
+            raise ValueError(f"Invalid {info.field_name} for CNAME record: {v}") from None
         return v
 
 

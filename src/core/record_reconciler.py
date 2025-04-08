@@ -1,8 +1,8 @@
 from typing import Dict, Iterable, List, Tuple
 
-from config import load_settings
-from core.record_intent import RecordIntent
-from logger import logger
+from src.config import load_settings
+from src.core.record_intent import RecordIntent
+from src.logger import logger
 
 settings = load_settings()
 

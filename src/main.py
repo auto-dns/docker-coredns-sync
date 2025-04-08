@@ -1,15 +1,16 @@
 import signal
 import sys
+from typing import Any
 
-from backends.etcd_registry import EtcdRegistry
-from core.sync_engine import SyncEngine
+from src.backends.etcd_registry import EtcdRegistry
+from src.core.sync_engine import SyncEngine
 
 
-def main():
+def main() -> None:
     registry = EtcdRegistry()
     engine = SyncEngine(registry)
 
-    def shutdown_handler(signum, frame):
+    def shutdown_handler(signum: int, frame: Any) -> None:
         print("Shutting down...")
         engine.stop()
         sys.exit(0)

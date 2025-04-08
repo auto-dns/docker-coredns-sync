@@ -8,17 +8,17 @@ from typing import Callable
 import docker
 from docker.models.containers import Container
 
-from core.container_event import ContainerEvent
-from logger import logger
-from utils.timing import retry
+from src.core.container_event import ContainerEvent
+from src.logger import logger
+from src.utils.timing import retry
 
 
 class DockerWatcher:
-    def __init__(self):
+    def __init__(self) -> None:
         self.client = docker.from_env()
         self.running = True
 
-    def subscribe(self, callback: Callable[[ContainerEvent], None]):
+    def subscribe(self, callback: Callable[[ContainerEvent], None]) -> None:
         """
         Subscribe to Docker events and invoke the callback with a ContainerEvent.
         This runs in a background thread.
@@ -33,13 +33,13 @@ class DockerWatcher:
         except Exception as e:
             logger.warning(f"[docker_watcher] Failed to list running containers: {e}")
 
-    def _watch_events(self, callback: Callable[[ContainerEvent], None]):
+    def _watch_events(self, callback: Callable[[ContainerEvent], None]) -> None:
         """
         Internal loop that listens to Docker events and calls the callback.
         """
         logger.info("[docker_watcher] Watching for Docker events...")
         try:
-            for event in self.client.events(decode=True):
+            for event in self.client.events(decode=True):  # type: ignore[no-untyped-call]
                 if not self.running:
                     break
 
@@ -94,5 +94,5 @@ class DockerWatcher:
             attrs=getattr(container, "attrs", {}),
         )
 
-    def stop(self):
+    def stop(self) -> None:
         self.running = False
