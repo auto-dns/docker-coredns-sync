@@ -1,12 +1,14 @@
 # src/core/docker_watcher.py
 
-from core.container_event import ContainerEvent
-import docker
-from docker.models.containers import Container
 import threading
 import time
-from typing import Callable, Optional, Dict
 from datetime import datetime, timezone
+from typing import Callable
+
+import docker
+from docker.models.containers import Container
+
+from core.container_event import ContainerEvent
 from logger import logger
 from utils.timing import retry
 

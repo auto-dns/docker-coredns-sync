@@ -1,20 +1,17 @@
-import etcd3
 import json
 import time
-from typing import List, Union
 from contextlib import contextmanager
 from datetime import datetime
+from typing import List, Union
+
+import etcd3
 
 from config import load_settings
-from core.dns_record import Record, ARecord, CNAMERecord
+from core.dns_record import ARecord, CNAMERecord
 from core.record_intent import RecordIntent
 from interfaces.registry_with_lock import RegistryWithLock
 from logger import logger
-from utils.errors import (
-	EtcdConnectionError,
-	RegistryUnsupportedRecordTypeError,
-	RegistryParseError
-)
+from utils.errors import EtcdConnectionError, RegistryParseError, RegistryUnsupportedRecordTypeError
 
 settings = load_settings()
 

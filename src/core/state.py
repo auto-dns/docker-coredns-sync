@@ -1,6 +1,7 @@
-from datetime import datetime
 import time
+from datetime import datetime
 from typing import Dict, List
+
 from core.record_intent import RecordIntent
 
 
