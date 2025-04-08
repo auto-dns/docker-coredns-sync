@@ -1,5 +1,3 @@
-# src/core/docker_watcher.py
-
 import threading
 import time
 from datetime import datetime, timezone
@@ -15,6 +13,7 @@ from src.utils.timing import retry
 
 class DockerWatcher:
     def __init__(self) -> None:
+        logger.debug("[docker_watcher] Initializing Docker watcher")
         self.client = docker.from_env()
         self.running = True
 
@@ -23,12 +22,15 @@ class DockerWatcher:
         Subscribe to Docker events and invoke the callback with a ContainerEvent.
         This runs in a background thread.
         """
+        logger.info("[docker_watcher] Starting Docker event subscription thread")
         thread = threading.Thread(target=self._watch_events, args=(callback,), daemon=True)
         thread.start()
 
         # Emit all currently running containers at startup
         try:
+            logger.info("[docker_watcher] Listing currently running containers")
             for container in self.client.containers.list(filters={"status": "running"}):
+                logger.debug(f"[docker_watcher] Found running container: {container.id}")
                 callback(self._build_container_event(container, status="start"))
         except Exception as e:
             logger.warning(f"[docker_watcher] Failed to list running containers: {e}")
@@ -41,6 +43,7 @@ class DockerWatcher:
         try:
             for event in self.client.events(decode=True):  # type: ignore[no-untyped-call]
                 if not self.running:
+                    logger.info("[docker_watcher] Stopping event watch loop")
                     break
 
                 if event.get("Type") != "container":
@@ -52,8 +55,11 @@ class DockerWatcher:
                 if status not in {"start", "die", "stop", "destroy"}:
                     continue
 
+                logger.debug(f"[docker_watcher] Received container event: {status} for container {container_id}")
+
                 if status == "start":
                     try:
+                        logger.debug(f"[docker_watcher] Getting container info for {container_id}")
                         container = self._safe_get_container(container_id)
                         callback(self._build_container_event(container, status=status))
                     except Exception as e:
@@ -74,6 +80,7 @@ class DockerWatcher:
 
     @retry(retries=3, delay=0.5, logger_func=logger.error)
     def _safe_get_container(self, container_id: str) -> Container:
+        logger.debug(f"[docker_watcher] Attempting to get container {container_id}")
         return self.client.containers.get(container_id)
 
     def _build_container_event(self, container: Container, status: str) -> ContainerEvent:
@@ -83,8 +90,10 @@ class DockerWatcher:
                 timezone.utc
             )
         except Exception:
+            logger.debug(f"[docker_watcher] Failed to parse creation time for container {container.id}")
             created = None
 
+        logger.debug(f"[docker_watcher] Building container event for {container.id} with status {status}")
         return ContainerEvent(
             id=container.id,
             name=getattr(container, "name", "<unknown>"),
@@ -95,4 +104,5 @@ class DockerWatcher:
         )
 
     def stop(self) -> None:
+        logger.info("[docker_watcher] Stopping Docker watcher")
         self.running = False
