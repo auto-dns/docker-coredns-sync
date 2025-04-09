@@ -124,7 +124,7 @@ class EtcdRegistry(RegistryWithLock):
                     pass
 
     def _get_etcd_key(self, record_intent: RecordIntent) -> str:
-        # Format: ***REMOVED***/api
+        # Format: /skydns/com/example/foo
         parts = record_intent.record.name.strip(".").split(".")[::-1]
         return f"{settings.etcd_path_prefix}/{'/'.join(parts)}"
 
