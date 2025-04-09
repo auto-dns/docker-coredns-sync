@@ -16,8 +16,8 @@ class Settings(BaseSettings):
     etcd_host: str = Field(default="localhost")
     etcd_port: int = Field(default=2379)
     etcd_path_prefix: str = Field(default="/skydns")
-    etcd_lock_ttl: float = Field(default=5)
-    etcd_lock_timeout: float = Field(default=2.0)
+    etcd_lock_ttl: int = Field(default=5)
+    etcd_lock_timeout: int = Field(default=2)
     etcd_lock_retry_interval: float = Field(default=0.1)
 
     model_config = {"env_file": ".env", "extra": "ignore"}  # or .devcontainer/devcontainer.env

@@ -6,14 +6,14 @@ from src.core.docker_watcher import DockerWatcher
 from src.core.record_builder import get_container_record_intents
 from src.core.record_reconciler import reconcile
 from src.core.state import StateTracker
-from src.interfaces.registry_interface import DnsRegistry
+from src.interfaces.registry_with_lock import RegistryWithLock
 from src.logger import logger
 
 settings = load_settings()
 
 
 class SyncEngine:
-    def __init__(self, registry: DnsRegistry, poll_interval: float = 5.0):
+    def __init__(self, registry: RegistryWithLock, poll_interval: float = 5.0):
         self.registry = registry
         self.poll_interval = poll_interval
         self.state = StateTracker()
@@ -43,19 +43,18 @@ class SyncEngine:
 
         while self.running:
             try:
-                # Fetch the current state (local docker container record_intents, remote etcd record_intents)
-                actual_record_intents = self.registry.list()
-                desired_record_intents = self.state.get_all_desired_record_intents()
-
-                to_add, to_remove = reconcile(desired_record_intents, actual_record_intents)
-                
-                for r in to_remove:
-                    self.registry.remove(r)
-                for r in to_add:
-                    self.registry.register(r)
-
-                # Step 5: Expire stale containers from memory
                 self.state.remove_stale(ttl=60)
+
+                with self.registry.lock_transaction("__global__"):
+                    actual_record_intents = self.registry.list()
+                    desired_record_intents = self.state.get_all_desired_record_intents()
+
+                    to_add, to_remove = reconcile(desired_record_intents, actual_record_intents)
+
+                    for r in to_remove:
+                        self.registry.remove(r)
+                    for r in to_add:
+                        self.registry.register(r)
 
             except Exception as e:
                 logger.error(f"[sync_engine] Sync error: {e}")

@@ -5,15 +5,17 @@
 Goal: Basic A record registration.
 
 Expected:
-* One A record in etcd: app1.***REMOVED*** -> 192.168.1.100
+* One A record in etcd: app1.example.com -> 192.168.1.100
 * Owned by this host
 
-Verify:
-* docker exec -it etcd etcdctl get --prefix ***REMOVED***/app1
-* Logs: look for [reconciler] Adding new record
-
 ```bash
-docker run -d --name test-a1 --label coredns.enabled=true --label coredns.A.name=app1.***REMOVED*** --label coredns.A.value=192.168.1.100 busybox sleep 9999
+docker run -d --name test-a1 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.100 busybox sleep 9999
+```
+
+Verify:
+* Logs: look for [reconciler] Adding new record
+```bash
+docker exec -it etcd etcdctl get --prefix /skydns
 ```
 
 ## Case 2
@@ -33,21 +35,17 @@ Expected:
 * Logs show: [reconciler] Duplicate record with same name and value already exists... Skipping
 
 ```bash
-docker run -d --name test-a2 --label coredns.enabled=true --label coredns.A.name=app1.***REMOVED*** --label coredns.A.value=192.168.1.100 busybox sleep 9999
+docker run -d --name test-a2 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.100 busybox sleep 9999
 ```
 
 ## Case 4
 
 Expected:
 * Should be accepted and registered
-* Now 2 A records under app1.***REMOVED*** (for 192.168.1.100 and .101)
-
-Verify:
-* docker exec -it etcd etcdctl get --prefix ***REMOVED***/app1
-* Or query via CoreDNS: dig @<coredns_ip> app1.***REMOVED***
+* Now 2 A records under app1.example.com (for 192.168.1.100 and .101)
 
 ```bash
-docker run -d --name test-a3 --label coredns.enabled=true --label coredns.A.name=app1.***REMOVED*** --label coredns.A.value=192.168.1.101 busybox sleep 9999
+docker run -d --name test-a3 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.101 busybox sleep 9999
 ```
 
 ## Case 5
@@ -57,34 +55,34 @@ Expected:
 * Logs show validation error: cannot add a CNAME record when an A record exists with the same name
 
 ```bash
-docker run -d --name test-c1 --label coredns.enabled=true --label coredns.CNAME.name=app1.***REMOVED*** --label coredns.CNAME.value=another.***REMOVED*** busybox sleep 9999
+docker run -d --name test-c1 --label coredns.enabled=true --label coredns.CNAME.name=app1.example.com --label coredns.CNAME.value=another.example.com busybox sleep 9999
 ```
 
 ## Case 6
 
 Expected:
 * ✅ Added successfully
-* ***REMOVED*** resolves to same as app1.***REMOVED***
+* app2.example.com resolves to same as app1.example.com
 
 ```bash
-docker run -d --name test-c2 --label coredns.enabled=true --label coredns.CNAME.name=***REMOVED*** --label coredns.CNAME.value=app1.***REMOVED*** busybox sleep 9999
+docker run -d --name test-c2 --label coredns.enabled=true --label coredns.CNAME.name=app2.example.com --label coredns.CNAME.value=app1.example.com busybox sleep 9999
 ```
 
 ## Case 7
 
 Expected:
-* Replaces previous A records under app1.***REMOVED***
+* Replaces previous A records under app1.example.com
 * Old records are removed
 * Logs show: [reconciler] Forcibly overriding record owned by...
 
 ```bash
-docker run -d --name test-a4 --label coredns.enabled=true --label coredns.A.name=app1.***REMOVED*** --label coredns.A.value=192.168.1.102 --label coredns.A.force=true busybox sleep 9999
+docker run -d --name test-a4 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.102 --label coredns.A.force=true busybox sleep 9999
 ```
 
 ## Case 8
 
 Expected:
-* Record app1.***REMOVED*** -> 192.168.1.101 is removed
+* Record app1.example.com -> 192.168.1.101 is removed
 * Logs show:
 [sync_engine] Removing record due to stale state
 
