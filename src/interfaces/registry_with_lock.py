@@ -13,7 +13,9 @@ class RegistryWithLock(DnsRegistry, Protocol):
         `key` is typically a record name (FQDN) or name group to scope the lock.
 
         Example usage:
-        with registry.lock_transaction("***REMOVED***"):
+        with registry.lock_transaction("foo.example.com"):
+            ...
+        with registry.lock_transaction("__global__"):
             ...
         """
         ...
