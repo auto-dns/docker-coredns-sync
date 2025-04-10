@@ -9,7 +9,7 @@ Expected:
 * Owned by this host
 
 ```bash
-docker run -d --name test-a1 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.100 busybox sleep 9999
+docker run -d --rm --name test-a1 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.100 traefik/whoami
 ```
 
 Verify:
@@ -35,7 +35,7 @@ Expected:
 * Logs show: [reconciler] Duplicate record with same name and value already exists... Skipping
 
 ```bash
-docker run -d --name test-a2 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.100 busybox sleep 9999
+docker run -d --rm --name test-a2 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.100 traefik/whoami
 ```
 
 ## Case 4
@@ -45,7 +45,7 @@ Expected:
 * Now 2 A records under app1.example.com (for 192.168.1.100 and .101)
 
 ```bash
-docker run -d --name test-a3 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.101 busybox sleep 9999
+docker run -d --rm --name test-a3 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.101 traefik/whoami
 ```
 
 ## Case 5
@@ -55,7 +55,7 @@ Expected:
 * Logs show validation error: cannot add a CNAME record when an A record exists with the same name
 
 ```bash
-docker run -d --name test-c1 --label coredns.enabled=true --label coredns.CNAME.name=app1.example.com --label coredns.CNAME.value=another.example.com busybox sleep 9999
+docker run -d --rm --name test-c1 --label coredns.enabled=true --label coredns.CNAME.name=app1.example.com --label coredns.CNAME.value=another.example.com traefik/whoami
 ```
 
 ## Case 6
@@ -65,7 +65,7 @@ Expected:
 * app2.example.com resolves to same as app1.example.com
 
 ```bash
-docker run -d --name test-c2 --label coredns.enabled=true --label coredns.CNAME.name=app2.example.com --label coredns.CNAME.value=app1.example.com busybox sleep 9999
+docker run -d --rm --name test-c2 --label coredns.enabled=true --label coredns.CNAME.name=app2.example.com --label coredns.CNAME.value=app1.example.com traefik/whoami
 ```
 
 ## Case 7
@@ -76,7 +76,7 @@ Expected:
 * Logs show: [reconciler] Forcibly overriding record owned by...
 
 ```bash
-docker run -d --name test-a4 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.102 --label coredns.A.force=true busybox sleep 9999
+docker run -d --rm --name test-a4 --label coredns.enabled=true --label coredns.A.name=app1.example.com --label coredns.A.value=192.168.1.102 --label coredns.A.force=true traefik/whoami
 ```
 
 ## Case 8
