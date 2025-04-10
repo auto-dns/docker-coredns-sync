@@ -31,7 +31,7 @@ def reconcile(
         if (
             not existing
             or r.force
-            or (not existing.force and r.created > existing.created)
+            or (not existing.force and r.created < existing.created)
         ):
             desired_by_key[key] = r
 
