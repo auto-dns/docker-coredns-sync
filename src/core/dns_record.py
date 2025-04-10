@@ -23,6 +23,13 @@ class DnsRecord(BaseModel):
     def render(self) -> str:
         return f"{self.name} -> {getattr(self, 'value', '<no value>')}"
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, DnsRecord):
+            return NotImplemented
+        return (self.name == other.name and 
+                self.record_type == other.record_type and 
+                self.value == other.value)
+
     model_config = {
         "frozen": True,
         "extra": "forbid",

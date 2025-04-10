@@ -12,3 +12,13 @@ class RecordIntent(BaseModel):
     force: bool = False
     hostname: str
     record: Record
+
+    def __eq__(self, other):
+        if not isinstance(other, RecordIntent):
+            return False
+        
+        return (
+            self.container_name == other.container_name and
+            self.hostname == other.hostname and
+            self.record == other.record
+        )

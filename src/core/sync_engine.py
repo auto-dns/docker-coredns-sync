@@ -4,7 +4,7 @@ from src.config import load_settings
 from src.core.container_event import ContainerEvent
 from src.core.docker_watcher import DockerWatcher
 from src.core.record_builder import get_container_record_intents
-from src.core.record_reconciler import reconcile
+from src.core.record_reconciler import filter_record_intents, reconcile_and_validate
 from src.core.state import StateTracker
 from src.interfaces.registry_with_lock import RegistryWithLock
 from src.logger import logger
@@ -43,13 +43,12 @@ class SyncEngine:
 
         while self.running:
             try:
-                self.state.remove_stale(ttl=60)
-
                 with self.registry.lock_transaction("__global__"):
                     actual_record_intents = self.registry.list()
                     desired_record_intents = self.state.get_all_desired_record_intents()
+                    desired_record_intents_reconciled = filter_record_intents(desired_record_intents)
 
-                    to_add, to_remove = reconcile(desired_record_intents, actual_record_intents)
+                    to_add, to_remove = reconcile_and_validate(desired_record_intents_reconciled, actual_record_intents)
 
                     for r in to_remove:
                         self.registry.remove(r)
