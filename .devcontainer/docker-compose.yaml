@@ -3,7 +3,7 @@ services:
     container_name: docker-coredns-sync-dev
     build:
       context: ..
-      dockerfile: ./Dockerfile
+      dockerfile: ./deploy/Dockerfile
       target: dev
     volumes:
       - ../:/workspace:cached
