@@ -79,7 +79,7 @@ class EtcdRegistry(RegistryWithLock):
                 record_intent = self._parse_etcd_value(meta.key.decode(), value.decode())
                 record_intents.append(record_intent)
             except Exception as e:
-                logger.error(f"[etcd_registry] Failed to parse key: {meta.key}: {e}")
+                logger.exception(f"[etcd_registry] Failed to parse key: {meta.key}: {e}")
         return record_intents
 
     @contextmanager
