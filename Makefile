@@ -6,11 +6,11 @@ VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo latest)
 
 # Default to prod build
 build:
-	docker build -t $(IMAGE):$(VERSION) --target prod .
+	docker build -t $(IMAGE):$(VERSION) --target release -f ./deploy/Dockerfile .
 
 # Dev container build (optional)
 build-dev:
-	docker build -t $(IMAGE):dev --target dev .
+	docker build -t $(IMAGE):dev --target dev -f ./deploy/Dockerfile .
 
 # Push image
 push:
