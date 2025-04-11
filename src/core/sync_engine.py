@@ -56,7 +56,7 @@ class SyncEngine:
                         self.registry.register(r)
 
             except Exception as e:
-                logger.error(f"[sync_engine] Sync error: {e}")
+                logger.exception(f"[sync_engine] Sync error: {e}")
 
             time.sleep(self.poll_interval)
 
