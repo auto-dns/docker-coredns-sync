@@ -75,10 +75,10 @@ class DockerWatcher:
                     )  # Minimal data for stop/die
 
         except Exception as e:
-            logger.error(f"[docker_watcher] Docker event loop error: {e}")
+            logger.exception(f"[docker_watcher] Docker event loop error: {e}")
             time.sleep(5)
 
-    @retry(retries=3, delay=0.5, logger_func=logger.error)
+    @retry(retries=3, delay=0.5, logger_func=logger.exception)
     def _safe_get_container(self, container_id: str) -> Container:
         logger.debug(f"[docker_watcher] Attempting to get container {container_id}")
         return self.client.containers.get(container_id)
