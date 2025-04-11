@@ -1,6 +1,6 @@
-FROM python:3.11-slim AS base
+FROM python:3.12-slim AS base
 WORKDIR /app
-LABEL org.opencontainers.image.source https://github.com/StevenC4/docker-coredns-sync
+LABEL org.opencontainers.image.source=https://github.com/StevenC4/docker-coredns-sync
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
@@ -28,7 +28,7 @@ EXPOSE 5678
 CMD ["sleep", "infinity"]
 
 FROM base AS release
-COPY requirements.txt ./
+COPY ./requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY src/ ./src/
-CMD ["python", "-m", "main"]
+COPY ./src .
+CMD ["python", "-m", "src"]

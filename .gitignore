@@ -1,3 +1,6 @@
 .env
 /.devcontainer/etcd
 /.devcontainer/.shell_history
+/.mypy_cache
+/.pytest_cache
+/.ruff_cache
