@@ -24,6 +24,41 @@ def _should_replace_existing(new: RecordIntent, existing: RecordIntent) -> bool:
         return False
     return new.created < existing.created
 
+def _should_replace_all_existing(new: RecordIntent, existing: List[RecordIntent]) -> bool:
+    """
+    Returns True if `new` (CNAME) should replace all `existing` (A records).
+
+    Rules:
+    - If any existing is force and new is not, new loses.
+    - If new is force and all existing are not, new wins.
+    - If mixed force values exist and new is force:
+        - New must be older than *all* existing force records.
+        - Otherwise, new loses.
+    - If force flags match for all (either all force or all non-force), the oldest record wins.
+    """
+    if not existing:
+        return True
+
+    any_force = any(r.force for r in existing)
+    all_force = all(r.force for r in existing)
+    all_non_force = all(not r.force for r in existing)
+
+    # Case: any force in existing and new is not — new loses
+    if any_force and not new.force:
+        return False
+
+    # Case: new is force and all existing are not — new wins
+    if new.force and all_non_force:
+        return True
+
+    # Case: mixed force and new is force — must beat all force records by age
+    if new.force and not all_force:
+        force_records = [r for r in existing if r.force]
+        return all(new.created < r.created for r in force_records)
+
+    # Case: force flags match — use age to break tie
+    return all(new.created < r.created for r in existing)
+
 def filter_record_intents(records: Iterable[RecordIntent]) -> Tuple[List[RecordIntent]]:
     logger.debug("[reconciler] Reconciling desired records against each other")
 
@@ -57,9 +92,7 @@ def filter_record_intents(records: Iterable[RecordIntent]) -> Tuple[List[RecordI
         elif isinstance(r.record, CNAMERecord):
             if existing_a:
                 # There are A records with the same name
-                # Only need to inspect one (they’re all same name)
-                existing = next(iter(existing_a.values()))
-                if _should_replace_existing(r, existing):
+                if _should_replace_all_existing(r, existing_a.values()):
                     # Remove all A records and add CNAME
                     del desired_by_name_type[name]["A"]
                     desired_by_name_type[name]["CNAME"][value] = r
