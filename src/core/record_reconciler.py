@@ -1,6 +1,6 @@
 
 from collections import defaultdict
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, Iterable, List, Set, Tuple
 
 from src.config import load_settings
 from src.core.dns_record import ARecord, CNAMERecord
@@ -12,7 +12,7 @@ settings = load_settings()
 
 
 def _record_key(r: RecordIntent) -> Tuple[str, str, str]:
-    return (r.record.name, r.record.record_type, str(r.record.value))
+    return (r.record.name, r.record.record_type, r.record.value)
 
 def _should_replace_existing(new: RecordIntent, existing: RecordIntent) -> bool:
     """
@@ -66,7 +66,7 @@ def filter_record_intents(records: Iterable[RecordIntent]) -> Tuple[List[RecordI
 
     for r in records:
         name = r.record.name
-        value = str(r.record.value)
+        value = r.record.value
 
         existing_types = desired_by_name_type.get(name, {})
         existing_a = existing_types.get("A", {})
@@ -119,21 +119,30 @@ def reconcile_and_validate(
     desired: Iterable[RecordIntent], actual: Iterable[RecordIntent]
 ) -> Tuple[List[RecordIntent], List[RecordIntent]]:
     logger.debug("[reconciler] Starting unified reconciliation")
-
-    actual_by_name_type: Dict[str, Dict[str, Dict[str, RecordIntent]]] = defaultdict(lambda: defaultdict(dict))
-    for r in actual:
-        name = r.record.name
-        record_type = r.record.record_type
-        value = str(r.record.value)
-        actual_by_name_type[name][record_type][value] = r
     
     to_add: Dict[Tuple[str, str, str], RecordIntent] = {}
     to_remove: Dict[Tuple[str, str, str], RecordIntent] = {}
 
+    actual_by_name_type: Dict[str, Dict[str, Dict[str, RecordIntent]]] = defaultdict(lambda: defaultdict(dict))
+    # Remove of stale records (owned by this host) to the top - add to "to_remove" so they'll get packaged into the simulated state
+    desired_set: Set[RecordIntent] = set(desired)
+    for r in actual:
+        if r not in desired_set:
+            logger.info(
+                f"[reconciler] Removing stale record: {r.record.render()} "
+                f"(owned by {r.hostname}/{r.container_name})"
+            )
+            to_remove[_record_key(r)] = r
+        else:
+            name = r.record.name
+            record_type = r.record.record_type
+            value = r.record.value
+            actual_by_name_type[name][record_type][value] = r    
+
     # Reconcile each contender
     for desired_record in desired:
         name = desired_record.record.name
-        value = str(desired_record.record.value)
+        value = desired_record.record.value
 
         actual_types = actual_by_name_type.get(name, {})
         actual_a = actual_types.get("A", {})
@@ -162,6 +171,9 @@ def reconcile_and_validate(
             elif value in actual_a:
                 # Actual remote record is an A record
                 actual_record = actual_a[value]
+                # Currently, the __eq__ implementation compares
+                # container_id, container_name, hostname, force, record
+                # TODO: test how this impacts eviction
                 if actual_record == desired_record:
                     continue
                 elif desired_record.force:
@@ -228,11 +240,5 @@ def reconcile_and_validate(
             logger.warning(
                 f"[reconciler] Skipping invalid record {desired_record.record.render()} — {e}"
             )
-
-    # Final stale cleanup (only remove what we own and don't plan to keep)
-    all_desired_keys = set([_record_key(r) for r in desired]) | set(to_add.keys())
-    for r in actual:
-        if r.hostname == settings.hostname and _record_key(r) not in all_desired_keys:
-            to_remove[_record_key(r)] = r
 
     return list(to_add.values()), list(to_remove.values())

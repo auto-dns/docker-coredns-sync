@@ -30,6 +30,9 @@ class DnsRecord(BaseModel):
                 self.record_type == other.record_type and 
                 self.value == other.value)
 
+    def __hash__(self) -> int:
+        return hash((self.name, self.record_type, self.value))
+
     model_config = {
         "frozen": True,
         "extra": "forbid",
