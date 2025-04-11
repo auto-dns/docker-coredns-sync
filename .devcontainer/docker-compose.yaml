@@ -9,6 +9,12 @@ services:
       - ../:/workspace:cached
       - /var/run/docker.sock:/var/run/docker.sock
       - ../coredns:/etc/coredns:ro
+      - ./.shell_history/docker_coredns_sync_bash_history:/home/vscode/.bash_history
+      - ./.shell_history/docker_coredns_sync_zsh_history:/home/vscode/.zsh_history
+    environment:
+      - HISTFILE=/home/vscode/.zsh_history
+      - HISTSIZE=10000
+      - SAVEHIST=10000
     depends_on:
       - etcd
       - coredns
@@ -18,6 +24,7 @@ services:
   etcd:
     image: bitnami/etcd:latest
     container_name: etcd
+    hostname: etcd
     environment:
       - ALLOW_NONE_AUTHENTICATION=yes
       - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
@@ -27,11 +34,16 @@ services:
       - ETCD_INITIAL_CLUSTER=etcd=http://etcd:2380
       - ETCD_INITIAL_CLUSTER_STATE=new
       - ETCD_NAME=etcd
+      - HISTFILE=/.bash_history
+      - HISTSIZE=10000
+      - SAVEHIST=10000
     ports:
       - "2379:2379"
       - "2380:2380"
     volumes:
       - ./etcd:/bitnami/etcd
+      - ./.shell_history/etcd_history:/.bash_history
+    user: root
 
   coredns:
     image: coredns/coredns:1.12.1
