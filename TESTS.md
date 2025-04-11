@@ -105,3 +105,82 @@ docker exec -it etcd etcdctl get --prefix /skydns/
 ```bash
 docker rm -f test-a1 test-a2 test-a3 test-a4 test-c1 test-c2
 ```
+
+# Additional Corner Case Test Cases
+
+## Case 10
+
+Goal: CNAME record should override all A records with same name if it is older and has `force`.
+
+Expected:
+* All A records for `app3.example.com` are evicted.
+* CNAME record `app3.example.com -> target.example.com` is registered.
+* Logs show evictions and addition of the CNAME.
+
+```bash
+docker run -d --rm --name test-a5 --label coredns.enabled=true --label coredns.A.name=app3.example.com --label coredns.A.value=192.168.1.111 traefik/whoami
+docker run -d --rm --name test-a6 --label coredns.enabled=true --label coredns.A.name=app3.example.com --label coredns.A.value=192.168.1.112 traefik/whoami
+docker run -d --rm --name test-c3 --label coredns.enabled=true --label coredns.CNAME.name=app3.example.com --label coredns.CNAME.value=target.example.com --label coredns.CNAME.force=true traefik/whoami
+```
+
+## Case 11
+
+Goal: A record should *not* override CNAME if it is newer and lacks `force`.
+
+Expected:
+* Existing CNAME record remains.
+* A record attempt is skipped.
+* Logs show [reconciler] Record conflict (not overriding)...
+
+```bash
+docker run -d --rm --name test-c4 --label coredns.enabled=true --label coredns.CNAME.name=app4.example.com --label coredns.CNAME.value=target.example.com traefik/whoami
+docker run -d --rm --name test-a7 --label coredns.enabled=true --label coredns.A.name=app4.example.com --label coredns.A.value=192.168.1.113 traefik/whoami
+```
+
+## Case 12
+
+Goal: A record with force and newer timestamp should override older A record from another container.
+
+Expected:
+* Older A record is evicted.
+* New A record is added.
+* Logs show eviction and new addition.
+
+```bash
+docker run -d --rm --name test-a8 --label coredns.enabled=true --label coredns.A.name=app5.example.com --label coredns.A.value=192.168.1.114 traefik/whoami
+docker run -d --rm --name test-a9 --label coredns.enabled=true --label coredns.A.name=app5.example.com --label coredns.A.value=192.168.1.114 --label coredns.A.force=true traefik/whoami
+```
+
+## Case 13
+
+Goal: CNAME record with older timestamp but without force should not override A records with force.
+
+Expected:
+* A records remain.
+* CNAME attempt is skipped.
+* Logs show [reconciler] Record conflict (not overriding)...
+
+```bash
+docker run -d --rm --name test-a10 --label coredns.enabled=true --label coredns.A.name=app6.example.com --label coredns.A.value=192.168.1.115 --label coredns.A.force=true traefik/whoami
+docker run -d --rm --name test-c5 --label coredns.enabled=true --label coredns.CNAME.name=app6.example.com --label coredns.CNAME.value=target.example.com traefik/whoami
+```
+
+## Case 14
+
+Goal: Identical record registered from different container with no force â newer one should not override.
+
+Expected:
+* Original remains.
+* Duplicate is skipped.
+* Logs show [reconciler] Record conflict (not overriding)...
+
+```bash
+docker run -d --rm --name test-a11 --label coredns.enabled=true --label coredns.A.name=app7.example.com --label coredns.A.value=192.168.1.116 traefik/whoami
+docker run -d --rm --name test-a12 --label coredns.enabled=true --label coredns.A.name=app7.example.com --label coredns.A.value=192.168.1.116 traefik/whoami
+```
+
+## Cleanup
+
+```bash
+docker rm -f test-a5 test-a6 test-c3 test-c4 test-a7 test-a8 test-a9 test-a10 test-c5 test-a11 test-a12
+```
