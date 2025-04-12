@@ -60,7 +60,7 @@ class EtcdRegistry(RegistryWithLock):
             try:
                 existing = json.loads(value)
                 if (
-                    existing.get("host") == str(record_intent.record.value)
+                    existing.get("host") == record_intent.record.value
                     and existing.get("record_type") == record_intent.record.record_type
                     and existing.get("owner_hostname") == record_intent.hostname
                     and existing.get("owner_container_name") == record_intent.container_name
@@ -79,7 +79,7 @@ class EtcdRegistry(RegistryWithLock):
                 record_intent = self._parse_etcd_value(meta.key.decode(), value.decode())
                 record_intents.append(record_intent)
             except Exception as e:
-                logger.error(f"[etcd_registry] Failed to parse key: {meta.key}: {e}")
+                logger.exception(f"[etcd_registry] Failed to parse key: {meta.key}: {e}")
         return record_intents
 
     @contextmanager
@@ -132,11 +132,13 @@ class EtcdRegistry(RegistryWithLock):
         if isinstance(record_intent.record, (ARecord, CNAMERecord)):
             return json.dumps(
                 {
-                    "host": str(record_intent.record.value),
+                    "host": record_intent.record.value,
                     "record_type": record_intent.record.record_type,
                     "owner_hostname": record_intent.hostname,
+                    "owner_container_id": record_intent.container_id,
                     "owner_container_name": record_intent.container_name,
                     "created": record_intent.created.isoformat(),
+                    "force": record_intent.force,
                 }
             )
         else:
@@ -157,19 +159,22 @@ class EtcdRegistry(RegistryWithLock):
         record_type = data.get("record_type")
         host = data.get("host")
         owner_hostname = data.get("owner_hostname")
+        owner_container_id = data.get("owner_container_id")
         owner_container_name = data.get("owner_container_name")
         created_str = data.get("created")
         created = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+        force = data.get("force")
 
         if not record_type or not host:
             raise RegistryParseError(f"Missing required fields in etcd record: {data}")
 
         if record_type.upper() == "A":
             return RecordIntent(
-                container_id="<from-etcd>",
+                container_id=owner_container_id,
                 container_name=owner_container_name,
                 created=created,
                 hostname=owner_hostname,
+                force=force,
                 record=ARecord(
                     name=name,
                     value=host,
@@ -177,10 +182,11 @@ class EtcdRegistry(RegistryWithLock):
             )
         elif record_type.upper() == "CNAME":
             return RecordIntent(
-                container_id="<from-etcd>",
+                container_id=owner_container_id,
                 container_name=owner_container_name,
                 created=created,
                 hostname=owner_hostname,
+                force=force,
                 record=CNAMERecord(
                     name=name,
                     value=host,

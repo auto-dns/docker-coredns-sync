@@ -5,7 +5,7 @@
             "name": "Python Debugger: main",
             "type": "debugpy",
             "request": "launch",
-            "module": "src.main",
+            "module": "src",
             "justMyCode": true,
             "console": "integratedTerminal",
             "envFile": "${workspaceFolder}/.devcontainer/.env"
