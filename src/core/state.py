@@ -54,6 +54,9 @@ class StateTracker:
         return result
 
     def remove_stale(self, ttl: float = 60.0) -> None:
+        # Unused at the moment.
+        # Usage will require a recurring docker check to update lists of running containers
+        # but this is redundant based on the way we process events
         expired = [cid for cid, state in self._containers.items() if state.is_stale(ttl)]
         for cid in expired:
             del self._containers[cid]

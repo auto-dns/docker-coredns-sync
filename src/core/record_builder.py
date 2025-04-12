@@ -123,7 +123,7 @@ def get_container_record_intents(container_event: ContainerEvent) -> list[Record
             except ValueError as e:
                 logger.warning(f"[record_builder] Invalid ARecord {name}: {e}")
         elif "value" in base_label_pairs["A"]:
-            logger.error(
+            logger.exception(
                 f"[record_builder] {prefix}.A.value={base_label_pairs['A']['value']} label found with no matching {prefix}.A.name pair."
             )
     if "CNAME" in base_label_pairs:
@@ -152,11 +152,11 @@ def get_container_record_intents(container_event: ContainerEvent) -> list[Record
             except ValueError as e:
                 logger.warning(f"[record_builder] Invalid CNAMERecord {name}: {e}")
         elif "name" in base_label_pairs["CNAME"] and "value" not in base_label_pairs["CNAME"]:
-            logger.error(
+            logger.exception(
                 f"[record_builder] {prefix}.CNAME.name={base_label_pairs['CNAME']['name']} label found with no matching {prefix}.CNAME.value pair."
             )
         elif "value" in base_label_pairs["CNAME"] and "name" not in base_label_pairs["CNAME"]:
-            logger.error(
+            logger.exception(
                 f"[record_builder] {prefix}.CNAME.value={base_label_pairs['CNAME']['value']} label found with no matching {prefix}.CNAME.name pair."
             )
 
@@ -194,7 +194,7 @@ def get_container_record_intents(container_event: ContainerEvent) -> list[Record
                 except ValueError as e:
                     logger.warning(f"[record_builder] Invalid ARecord {name}: {e}")
             elif "value" in pair:
-                logger.error(
+                logger.exception(
                     f"[record_builder] {prefix}.A.value={pair['value']} label found with no matching {prefix}.A.name pair."
                 )
     if "CNAME" in aliased_label_pairs:
@@ -224,11 +224,11 @@ def get_container_record_intents(container_event: ContainerEvent) -> list[Record
                 except ValueError as e:
                     logger.warning(f"[record_builder] Invalid CNAMERecord {name}: {e}")
             elif "name" in pair and "value" not in pair:
-                logger.error(
+                logger.exception(
                     f"[record_builder] {prefix}.CNAME.name={pair['name']} label found with no matching {prefix}.CNAME.value pair."
                 )
             elif "value" in pair and "name" not in pair:
-                logger.error(
+                logger.exception(
                     f"[record_builder] {prefix}.CNAME.value={pair['value']} label found with no matching {prefix}.CNAME.name pair."
                 )
 
