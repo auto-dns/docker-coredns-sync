@@ -1,2 +1,3 @@
 .env
 /.devcontainer/etcd
+.DS_Store
