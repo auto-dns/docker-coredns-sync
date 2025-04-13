@@ -3,16 +3,16 @@ services:
     container_name: docker-coredns-sync-dev
     build:
       context: ..
-      dockerfile: ./deploy/Dockerfile
+      dockerfile: ./Dockerfile
       target: dev
     volumes:
       - ../:/workspace:cached
       - /var/run/docker.sock:/var/run/docker.sock
-      - ../coredns:/etc/coredns:ro
-      - ./.shell_history/docker_coredns_sync_bash_history:/home/vscode/.bash_history
-      - ./.shell_history/docker_coredns_sync_zsh_history:/home/vscode/.zsh_history
+      - docker_coredns_sync_shell_history:/home/vscode/.shell_history
+      - go_modules:/home/vscode/go
+      - go_cache:/home/vscode/.cache/go-build
     environment:
-      - HISTFILE=/home/vscode/.zsh_history
+      - HISTFILE=/home/vscode/.shell_history/zsh_history
       - HISTSIZE=10000
       - SAVEHIST=10000
     depends_on:
@@ -41,8 +41,8 @@ services:
       - "2379:2379"
       - "2380:2380"
     volumes:
-      - ./etcd:/bitnami/etcd
-      - ./.shell_history/etcd_history:/.bash_history
+      - etcd:/bitnami/etcd
+      - etcd_history:/.shell_history
     user: root
 
   coredns:
@@ -53,3 +53,13 @@ services:
       - ./coredns:/etc/coredns:ro
     ports:
       - "5336:5336/udp"
+
+volumes:
+  # shell history
+  docker_coredns_sync_shell_history: {}
+  etcd_history: {}
+  # etcd data
+  etcd: {}
+  # docker-coredns-sync
+  go_modules: {}
+  go_cache: {}

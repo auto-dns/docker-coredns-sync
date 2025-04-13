@@ -40,10 +40,6 @@ unrelease:
 
 dev-init:
 	@mkdir -p .devcontainer
-	@mkdir -p .devcontainer/.shell_history
-	@touch .devcontainer/.shell_history/docker_coredns_sync_bash_history
-	@touch .devcontainer/.shell_history/docker_coredns_sync_zsh_history
-	@touch .devcontainer/.shell_history/etcd_history
 	@mkdir -p .devcontainer/etcd
 	@if [ ! -f .devcontainer/.env ]; then \
 		UNAME_S=$$(uname -s); \
