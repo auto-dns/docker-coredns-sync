@@ -45,6 +45,7 @@ func InitConfig() error {
 	viper.SetDefault("app.docker_label_prefix", "coredns")
 	viper.SetDefault("app.host_ip", "127.0.0.1")
 	viper.SetDefault("app.hostname", "your-hostname")
+	viper.SetDefault("app.poll_interval", 5)
 	viper.SetDefault("log.log_level", "INFO")
 	viper.SetDefault("etcd.etcd_host", "localhost")
 	viper.SetDefault("etcd.etcd_port", 2379)
