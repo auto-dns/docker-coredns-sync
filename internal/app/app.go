@@ -13,7 +13,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-// App holds the dependencies of your application.
 type App struct {
 	Config   *config.Config
 	Logger   zerolog.Logger
