@@ -18,9 +18,9 @@ func NewARecord(name, value string) (*ARecord, error) {
 	}
 	return &ARecord{
 		DnsRecord: DnsRecord{
-			Name:       name,
-			RecordType: "A",
-			Value:      value,
+			Name:  name,
+			Type:  "A",
+			Value: value,
 		},
 	}, nil
 }
