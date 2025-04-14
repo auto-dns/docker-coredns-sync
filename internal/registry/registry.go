@@ -11,4 +11,5 @@ type Registry interface {
 	List(ctx context.Context) ([]intent.RecordIntent, error)
 	Register(ctx context.Context, record intent.RecordIntent) error
 	Remove(ctx context.Context, record intent.RecordIntent) error
+	Close() error
 }
