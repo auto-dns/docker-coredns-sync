@@ -18,8 +18,6 @@ services:
     depends_on:
       - etcd
       - coredns
-    ports:
-      - "5678:5678"  # For debugpy or other dev services
 
   etcd:
     image: bitnami/etcd:latest
@@ -41,7 +39,7 @@ services:
       - "2379:2379"
       - "2380:2380"
     volumes:
-      - etcd:/bitnami/etcd
+      - ./etcd:/bitnami/etcd
       - etcd_history:/.shell_history
     user: root
 

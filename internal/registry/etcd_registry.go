@@ -22,8 +22,8 @@ type etcdClient interface {
 	Delete(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error)
 	Grant(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error)
 	Txn(ctx context.Context) clientv3.Txn
-	Close() error
 	Revoke(ctx context.Context, id clientv3.LeaseID) (*clientv3.LeaseRevokeResponse, error)
+	Close() error
 }
 
 type EtcdRegistry struct {
@@ -33,13 +33,13 @@ type EtcdRegistry struct {
 	logger   zerolog.Logger
 }
 
-func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string, logger zerolog.Logger) (*EtcdRegistry, error) {
+func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string, logger zerolog.Logger) *EtcdRegistry {
 	return &EtcdRegistry{
 		client:   client,
 		cfg:      cfg,
 		hostname: hostname,
 		logger:   logger,
-	}, nil
+	}
 }
 
 // getNextIndexedKey generates a new etcd key for a record based on its fully qualified domain name (fqdn).
@@ -306,4 +306,8 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 		}
 	}
 	return err
+}
+
+func (er *EtcdRegistry) Close() error {
+	return er.client.Close()
 }

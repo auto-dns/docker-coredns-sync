@@ -64,7 +64,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().String("config", "", "config file (default is config.yaml)")
 	rootCmd.PersistentFlags().String("log-level", "INFO", "set log level (e.g. INFO, DEBUG, WARN)")
-	viper.BindPFlag("log.log_level", rootCmd.PersistentFlags().Lookup("log-level"))
+	viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
 
 	// Enable automatic environment variable binding.
 	viper.AutomaticEnv()

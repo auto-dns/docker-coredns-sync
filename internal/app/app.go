@@ -21,36 +21,30 @@ type App struct {
 	Engine   *core.SyncEngine
 }
 
-func getNewWatcher(cfg *config.Config, logger zerolog.Logger) (core.DockerWatcher, error) {
+func getNewWatcher(logger zerolog.Logger) (core.DockerWatcher, error) {
 	dockerClient, err := dockerCli.NewClientWithOpts(dockerCli.FromEnv, dockerCli.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, err
 	}
-	watcher, err := core.NewDockerWatcherImpl(dockerClient, logger)
-	if err != nil {
-		return nil, err
-	}
+	watcher := core.NewDockerWatcherImpl(dockerClient, logger)
 	return watcher, nil
 }
 
 func getNewRegistry(cfg *config.Config, logger zerolog.Logger) (registry.Registry, error) {
 	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{fmt.Sprintf("%s:%d", cfg.Etcd.Host, cfg.Etcd.Port)},
-		DialTimeout: 5 * time.Second,
+		Endpoints:   []string{fmt.Sprintf("http://%s:%d", cfg.Etcd.Host, cfg.Etcd.Port)},
+		DialTimeout: 2 * time.Second,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
 	}
-	reg, err := registry.NewEtcdRegistry(etcdClient, &cfg.Etcd, cfg.App.Hostname, logger)
-	if err != nil {
-		return nil, err
-	}
+	reg := registry.NewEtcdRegistry(etcdClient, &cfg.Etcd, cfg.App.Hostname, logger)
 	return reg, nil
 }
 
 // New creates a new App by wiring up all dependencies.
 func New(cfg *config.Config, logInstance zerolog.Logger) (*App, error) {
-	watcher, err := getNewWatcher(cfg, logInstance)
+	watcher, err := getNewWatcher(logInstance)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Docker watcher: %w", err)
 	}
