@@ -19,11 +19,11 @@ type DockerWatcherImpl struct {
 	cli    dockerClient
 }
 
-func NewDockerWatcherImpl(cli dockerClient, logger zerolog.Logger) (DockerWatcher, error) {
+func NewDockerWatcherImpl(cli dockerClient, logger zerolog.Logger) DockerWatcher {
 	return &DockerWatcherImpl{
 		logger: logger,
 		cli:    cli,
-	}, nil
+	}
 }
 
 // Subscribe connects to the Docker event stream and converts events into ContainerEvent objects.
@@ -69,6 +69,7 @@ func (dw *DockerWatcherImpl) Subscribe(ctx context.Context) (<-chan ContainerEve
 					Status:  msg.Status,
 					Created: time.Unix(0, msg.TimeNano),
 					Name:    msg.Actor.Attributes["name"],
+					Labels:  msg.Actor.Attributes,
 				}
 				dw.logger.Debug().Msgf("Received Docker event: %+v", evt)
 				out <- evt

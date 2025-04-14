@@ -18,17 +18,17 @@ type AppConfig struct {
 
 // LoggingConfig holds the logging-related configuration.
 type LoggingConfig struct {
-	Level string `mapstructure:"log_level"`
+	Level string `mapstructure:"level"`
 }
 
 // EtcdConfig holds etcd-related configuration.
 type EtcdConfig struct {
-	Host              string  `mapstructure:"etcd_host"`
-	Port              int     `mapstructure:"etcd_port"`
-	PathPrefix        string  `mapstructure:"etcd_path_prefix"`
-	LockTTL           float64 `mapstructure:"etcd_lock_ttl"`
-	LockTimeout       float64 `mapstructure:"etcd_lock_timeout"`
-	LockRetryInterval float64 `mapstructure:"etcd_lock_retry_interval"`
+	Host              string  `mapstructure:"host"`
+	Port              int     `mapstructure:"port"`
+	PathPrefix        string  `mapstructure:"path_prefix"`
+	LockTTL           float64 `mapstructure:"lock_ttl"`
+	LockTimeout       float64 `mapstructure:"lock_timeout"`
+	LockRetryInterval float64 `mapstructure:"lock_retry_interval"`
 }
 
 // Config is the top-level configuration struct.
@@ -46,13 +46,26 @@ func InitConfig() error {
 	viper.SetDefault("app.host_ip", "127.0.0.1")
 	viper.SetDefault("app.hostname", "your-hostname")
 	viper.SetDefault("app.poll_interval", 5)
-	viper.SetDefault("log.log_level", "INFO")
-	viper.SetDefault("etcd.etcd_host", "localhost")
-	viper.SetDefault("etcd.etcd_port", 2379)
-	viper.SetDefault("etcd.etcd_path_prefix", "/skydns")
-	viper.SetDefault("etcd.etcd_lock_ttl", 5.0)
-	viper.SetDefault("etcd.etcd_lock_timeout", 2.0)
-	viper.SetDefault("etcd.etcd_lock_retry_interval", 0.1)
+	viper.SetDefault("log.level", "INFO")
+	viper.SetDefault("etcd.host", "localhost")
+	viper.SetDefault("etcd.port", 2379)
+	viper.SetDefault("etcd.path_prefix", "/skydns")
+	viper.SetDefault("etcd.lock_ttl", 5.0)
+	viper.SetDefault("etcd.lock_timeout", 2.0)
+	viper.SetDefault("etcd.lock_retry_interval", 0.1)
+
+	// Map env vars to config fields
+	viper.BindEnv("app.docker_label_prefix", "DOCKER_LABEL_PREFIX")
+	viper.BindEnv("app.host_ip", "HOST_IP")
+	viper.BindEnv("app.hostname", "HOSTNAME")
+	viper.BindEnv("app.poll_interval", "POLL_INTERVAL")
+	viper.BindEnv("log.level", "LOG_LEVEL")
+	viper.BindEnv("etcd.host", "ETCD_HOST")
+	viper.BindEnv("etcd.port", "ETCD_PORT")
+	viper.BindEnv("etcd.path_prefix", "ETCD_PATH_PREFIX")
+	viper.BindEnv("etcd.lock_ttl", "ETCD_LOCK_TTL")
+	viper.BindEnv("etcd.lock_timeout", "ETCD_LOCK_TIMEOUT")
+	viper.BindEnv("etcd.lock_retry_interval", "ETCD_LOCK_RETRY_INTERVAL")
 
 	// Specify the config file details.
 	viper.SetConfigName("config") // Looks for config.yaml

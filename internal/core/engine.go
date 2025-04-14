@@ -82,7 +82,7 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ticker.C:
-			se.logger.Info().Msg("Reconciliation loop tick")
+			se.logger.Debug().Msg("Reconciliation loop tick")
 			err := se.registry.LockTransaction(ctx, []string{"__global__"}, func() error {
 				actual, err := se.registry.List(ctx)
 				if err != nil {
@@ -110,6 +110,10 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			se.logger.Info().Msg("SyncEngine shutting down")
 			se.watcher.Stop()
+			err := se.registry.Close()
+			if err != nil {
+				se.logger.Error().Err(err).Msg("Error closing registry")
+			}
 			return ctx.Err()
 		}
 	}
