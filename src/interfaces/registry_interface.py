@@ -1,9 +1,0 @@
-from typing import Protocol
-
-from src.core.record_intent import RecordIntent
-
-
-class DnsRegistry(Protocol):
-    def register(self, record: RecordIntent) -> None: ...
-    def remove(self, record: RecordIntent) -> None: ...
-    def list(self) -> list[RecordIntent]: ...
