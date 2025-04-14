@@ -20,9 +20,9 @@ func NewCNAMERecord(name, value string) (*CNAMERecord, error) {
 	}
 	return &CNAMERecord{
 		DnsRecord: DnsRecord{
-			Name:       name,
-			RecordType: "CNAME",
-			Value:      value,
+			Name:  name,
+			Type:  "CNAME",
+			Value: value,
 		},
 	}, nil
 }
