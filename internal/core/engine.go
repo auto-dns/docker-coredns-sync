@@ -29,6 +29,10 @@ func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, watcher DockerW
 	}
 }
 
+// TODO: improvement - aggregate list of currently running containers at startup
+// Accumulate list of events to process as soon as we're done handling the startup running containers
+// Don't reconcile state until we've finished with all that initialization
+
 func (se *SyncEngine) handleEvent(evt ContainerEvent) {
 	if evt.ID == "" {
 		return
