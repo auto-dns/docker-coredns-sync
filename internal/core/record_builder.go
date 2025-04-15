@@ -21,8 +21,8 @@ func getForce(labels map[string]string, containerForceLabel, recordForceLabel st
 }
 
 // GetContainerRecordIntents parses the container event's labels and returns record intents.
-func GetContainerRecordIntents(event ContainerEvent, settings *config.AppConfig, logger zerolog.Logger) ([]intent.RecordIntent, error) {
-	var intents []intent.RecordIntent
+func GetContainerRecordIntents(event ContainerEvent, settings *config.AppConfig, logger zerolog.Logger) ([]*intent.RecordIntent, error) {
+	var intents []*intent.RecordIntent
 
 	labels := event.Labels
 	prefix := settings.DockerLabelPrefix
@@ -86,7 +86,7 @@ func GetContainerRecordIntents(event ContainerEvent, settings *config.AppConfig,
 		}
 	}
 
-	recordIntents := []intent.RecordIntent{}
+	recordIntents := []*intent.RecordIntent{}
 	containerID := event.ID
 	containerName := event.Name
 	containerCreated := event.Created
@@ -108,7 +108,7 @@ func GetContainerRecordIntents(event ContainerEvent, settings *config.AppConfig,
 			if err != nil {
 				logger.Warn().Msgf("Invalid ARecord %s: %v", name, err)
 			} else {
-				intent := intent.RecordIntent{
+				intent := &intent.RecordIntent{
 					ContainerID:   containerID,
 					ContainerName: containerName,
 					Created:       containerCreated,
@@ -132,7 +132,7 @@ func GetContainerRecordIntents(event ContainerEvent, settings *config.AppConfig,
 				if err != nil {
 					logger.Warn().Msgf("Invalid CNAMERecord %s: %v", name, err)
 				} else {
-					intent := intent.RecordIntent{
+					intent := &intent.RecordIntent{
 						ContainerID:   containerID,
 						ContainerName: containerName,
 						Created:       containerCreated,
