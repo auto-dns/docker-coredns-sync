@@ -52,6 +52,14 @@ func (d *DefaultMap[K, V]) Items() map[K]V {
 	return d.internal
 }
 
+func (d *DefaultMap[K, V]) Keys() []K {
+	keys := make([]K, 0, len(d.internal))
+	for k, _ := range d.internal {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 func (d *DefaultMap[K, V]) Values() []V {
 	values := make([]V, 0, len(d.internal))
 	for _, v := range d.internal {

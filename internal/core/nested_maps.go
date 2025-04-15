@@ -43,6 +43,27 @@ func NewRecordMap() *RecordMap {
 	}
 }
 
+// By nothing
+func (m NestedRecordMap) GetAllValues() []*intent.RecordIntent {
+	values := make([]*intent.RecordIntent, 0)
+	for _, typeMap := range m.Values() {
+		for _, recordMap := range typeMap.Values() {
+			for _, recordIntent := range recordMap.Values() {
+				values = append(values, recordIntent)
+			}
+		}
+	}
+	return values
+}
+
+func (m NestedRecordMap) GetAllNames() []string {
+	names := make([]string, 0)
+	for _, key := range m.Keys() {
+		names = append(names, key)
+	}
+	return names
+}
+
 // By name
 
 // By name and type
@@ -54,6 +75,13 @@ func (m NestedRecordMap) PeekNameTypeRecords(name, recordType string) ([]*intent
 		return []*intent.RecordIntent{}, false
 	}
 	return []*intent.RecordIntent{}, false
+}
+
+// DeleteDomainType removes all records of a specific type for a name
+func (m NestedRecordMap) DeleteNameType(name, recordType string) {
+	if domainMap, exists := m.Peek(name); exists {
+		domainMap.Delete(recordType)
+	}
 }
 
 // By name, type, and value
@@ -74,23 +102,4 @@ func (m *NestedRecordMap) PeekNameTypeRecord(name, recordType, value string) (*i
 
 	recordIntent, exists := recordMap.Peek(value)
 	return recordIntent, exists
-}
-
-// DeleteDomainType removes all records of a specific type for a name
-func (m NestedRecordMap) DeleteNameType(name, recordType string) {
-	if domainMap, exists := m.Peek(name); exists {
-		domainMap.Delete(recordType)
-	}
-}
-
-func (m NestedRecordMap) GetAllValues() []*intent.RecordIntent {
-	values := make([]*intent.RecordIntent, 0)
-	for _, typeMap := range m.Values() {
-		for _, recordMap := range typeMap.Values() {
-			for _, recordIntent := range recordMap.Values() {
-				values = append(values, recordIntent)
-			}
-		}
-	}
-	return values
 }
