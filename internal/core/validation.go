@@ -82,18 +82,18 @@ func ValidateRecord(newRecordIntent *intent.RecordIntent, existingRecordIntents 
 		forwardMap[newRecord.GetName()] = newRecord.GetValue()
 
 		// Process to detect loops
-		seen := make(map[string]bool)
-		node := newRecord.GetName()
+		seenMap := make(map[string]struct{})
+		name := newRecord.GetName()
 		for {
-			nextNode, exists := forwardMap[node]
+			value, exists := forwardMap[name]
 			if !exists {
 				break
 			}
-			if seen[node] {
+			if _, seen := seenMap[name]; seen {
 				return NewRecordValidationError(fmt.Sprintf("CNAME cycle detected starting at: %s", newRecord.GetName()))
 			}
-			seen[node] = true
-			node = nextNode
+			seenMap[name] = struct{}{}
+			name = value
 		}
 	}
 	return nil

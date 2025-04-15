@@ -85,7 +85,7 @@ func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (str
 }
 
 // getEtcdValue converts a RecordIntent to its JSON representation for storing in etcd.
-func (er *EtcdRegistry) getEtcdValue(ri intent.RecordIntent) (string, error) {
+func (er *EtcdRegistry) getEtcdValue(ri *intent.RecordIntent) (string, error) {
 	// We assume that both ARecord and CNAMERecord implement dns.Record.
 	data := map[string]interface{}{
 		"host":                 ri.Record.GetValue(),
@@ -104,7 +104,7 @@ func (er *EtcdRegistry) getEtcdValue(ri intent.RecordIntent) (string, error) {
 }
 
 // parseEtcdValue converts an etcd key/value pair into a RecordIntent.
-func (er *EtcdRegistry) parseEtcdValue(key, value string) (intent.RecordIntent, error) {
+func (er *EtcdRegistry) parseEtcdValue(key, value string) (*intent.RecordIntent, error) {
 	// Remove the configured prefix.
 	path := strings.TrimPrefix(key, er.cfg.PathPrefix)
 	path = strings.TrimPrefix(path, "/")
@@ -123,15 +123,15 @@ func (er *EtcdRegistry) parseEtcdValue(key, value string) (intent.RecordIntent, 
 	fqdn := strings.Join(parts, ".")
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(value), &data); err != nil {
-		return intent.RecordIntent{}, err
+		return nil, err
 	}
 	recType, ok := data["record_type"].(string)
 	if !ok || recType == "" {
-		return intent.RecordIntent{}, fmt.Errorf("missing record_type in etcd record: %v", data)
+		return nil, fmt.Errorf("missing record_type in etcd record: %v", data)
 	}
 	host, ok := data["host"].(string)
 	if !ok || host == "" {
-		return intent.RecordIntent{}, fmt.Errorf("missing host in etcd record: %v", data)
+		return nil, fmt.Errorf("missing host in etcd record: %v", data)
 	}
 	ownerHostname, _ := data["owner_hostname"].(string)
 	ownerContainerID, _ := data["owner_container_id"].(string)
@@ -139,7 +139,7 @@ func (er *EtcdRegistry) parseEtcdValue(key, value string) (intent.RecordIntent, 
 	createdStr, _ := data["created"].(string)
 	created, err := time.Parse(time.RFC3339, createdStr)
 	if err != nil {
-		return intent.RecordIntent{}, err
+		return nil, err
 	}
 	force, _ := data["force"].(bool)
 
@@ -147,9 +147,9 @@ func (er *EtcdRegistry) parseEtcdValue(key, value string) (intent.RecordIntent, 
 	case "A", "a":
 		aRec, err := dns.NewARecord(fqdn, host)
 		if err != nil {
-			return intent.RecordIntent{}, err
+			return nil, err
 		}
-		return intent.RecordIntent{
+		return &intent.RecordIntent{
 			ContainerID:   ownerContainerID,
 			ContainerName: ownerContainerName,
 			Created:       created,
@@ -160,9 +160,9 @@ func (er *EtcdRegistry) parseEtcdValue(key, value string) (intent.RecordIntent, 
 	case "CNAME", "cname":
 		cnameRec, err := dns.NewCNAMERecord(fqdn, host)
 		if err != nil {
-			return intent.RecordIntent{}, err
+			return nil, err
 		}
-		return intent.RecordIntent{
+		return &intent.RecordIntent{
 			ContainerID:   ownerContainerID,
 			ContainerName: ownerContainerName,
 			Created:       created,
@@ -171,12 +171,12 @@ func (er *EtcdRegistry) parseEtcdValue(key, value string) (intent.RecordIntent, 
 			Record:        cnameRec,
 		}, nil
 	default:
-		return intent.RecordIntent{}, fmt.Errorf("unknown record type: %s", recType)
+		return nil, fmt.Errorf("unknown record type: %s", recType)
 	}
 }
 
 // Register stores the record intent in etcd.
-func (er *EtcdRegistry) Register(ctx context.Context, ri intent.RecordIntent) error {
+func (er *EtcdRegistry) Register(ctx context.Context, ri *intent.RecordIntent) error {
 	fqdn := ri.Record.GetName()
 	key, err := er.getNextIndexedKey(ctx, fqdn)
 	if err != nil {
@@ -191,7 +191,7 @@ func (er *EtcdRegistry) Register(ctx context.Context, ri intent.RecordIntent) er
 }
 
 // Remove finds and deletes the etcd key that matches the record intent.
-func (er *EtcdRegistry) Remove(ctx context.Context, ri intent.RecordIntent) error {
+func (er *EtcdRegistry) Remove(ctx context.Context, ri *intent.RecordIntent) error {
 	fqdn := ri.Record.GetName()
 	trimmed := strings.Trim(fqdn, ".")
 	parts := strings.Split(trimmed, ".")
@@ -229,13 +229,13 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri intent.RecordIntent) erro
 }
 
 // List retrieves all record intents stored in etcd under the configured prefix.
-func (er *EtcdRegistry) List(ctx context.Context) ([]intent.RecordIntent, error) {
+func (er *EtcdRegistry) List(ctx context.Context) ([]*intent.RecordIntent, error) {
 	prefix := er.cfg.PathPrefix
 	resp, err := er.client.Get(ctx, prefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
-	var intents []intent.RecordIntent
+	var intents []*intent.RecordIntent
 	for _, kv := range resp.Kvs {
 		keyStr := string(kv.Key)
 		ri, err := er.parseEtcdValue(keyStr, string(kv.Value))

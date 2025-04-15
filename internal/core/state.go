@@ -13,7 +13,7 @@ type ContainerState struct {
 	ContainerName string
 	Created       time.Time
 	LastUpdated   time.Time
-	RecordIntents []intent.RecordIntent
+	RecordIntents []*intent.RecordIntent
 	Status        string // "running", "removed"
 }
 
@@ -31,7 +31,7 @@ func NewStateTracker() *StateTracker {
 }
 
 // Upsert inserts or updates the state for a container.
-func (s *StateTracker) Upsert(containerID, containerName string, created time.Time, intents []intent.RecordIntent, status string) {
+func (s *StateTracker) Upsert(containerID, containerName string, created time.Time, intents []*intent.RecordIntent, status string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.containers[containerID] = &ContainerState{
@@ -55,10 +55,10 @@ func (s *StateTracker) MarkRemoved(containerID string) {
 }
 
 // GetAllDesiredRecordIntents returns all record intents from running containers.
-func (s *StateTracker) GetAllDesiredRecordIntents() []intent.RecordIntent {
+func (s *StateTracker) GetAllDesiredRecordIntents() []*intent.RecordIntent {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var intents []intent.RecordIntent
+	var intents []*intent.RecordIntent
 	for _, cs := range s.containers {
 		if cs.Status == "running" {
 			intents = append(intents, cs.RecordIntents...)
