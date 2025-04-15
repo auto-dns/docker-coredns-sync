@@ -89,7 +89,7 @@ func (er *EtcdRegistry) getEtcdValue(ri intent.RecordIntent) (string, error) {
 	// We assume that both ARecord and CNAMERecord implement dns.Record.
 	data := map[string]interface{}{
 		"host":                 ri.Record.GetValue(),
-		"record_type":          ri.Record.GetRecordType(),
+		"record_type":          ri.Record.GetType(),
 		"owner_hostname":       ri.Hostname,
 		"owner_container_id":   ri.ContainerID,
 		"owner_container_name": ri.ContainerName,
@@ -213,7 +213,7 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri intent.RecordIntent) erro
 		}
 		// Match based on record fields.
 		if data["host"] == ri.Record.GetValue() &&
-			data["record_type"] == ri.Record.GetRecordType() &&
+			data["record_type"] == ri.Record.GetType() &&
 			data["owner_hostname"] == ri.Hostname &&
 			data["owner_container_name"] == ri.ContainerName {
 			_, err := er.client.Delete(ctx, keyStr)
