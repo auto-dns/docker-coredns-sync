@@ -100,48 +100,24 @@ func FilterRecordIntents(recordIntents []*intent.RecordIntent, logger zerolog.Lo
 	logger.Debug().Msg("Reconciling desired records against each other")
 
 	desiredByNameType := NewNestedRecordMap()
-
 	for _, ri := range recordIntents {
 		record := ri.Record
 		name := record.GetName()
 		value := record.GetValue()
 
-		existingARecordIntents, hasARecords := desiredByNameType.PeekNameTypeRecords(name, "A")
-		existingCNAMERecordIntents, hasCNAMERecords := desiredByNameType.PeekNameTypeRecords(name, "CNAME")
-
-		// Check for conflicts between A and CNAME record types:
-		// We want to enforce: if an A record exists, and a CNAME comes in for same name, we choose one based on business rules.
 		if _, ok := record.(*dns.ARecord); ok {
-			if hasCNAMERecords {
-				// Get an existing CNAME record (assume only one exists)
-				existingCNAMERecordIntent := existingCNAMERecordIntents[0]
-				if shouldReplaceExisting(ri, existingCNAMERecordIntent, logger) {
-					// Remove CNAME record and add A record
-					desiredByNameType.DeleteNameType(name, "CNAME")
-					desiredByNameType.Get(name).Get("A").Set(value, ri)
-				}
-			} else if existingARecordIntent, exists := desiredByNameType.PeekNameTypeRecord(name, "A", value); exists {
-				if shouldReplaceExisting(ri, existingARecordIntent, logger) {
-					// Replace A record
-					desiredByNameType.Get(name).Get("A").Set(value, ri)
-				}
-			} else {
-				// No conflict - just add it
+			existingARecordIntent, duplicateExists := desiredByNameType.PeekNameTypeRecord(name, "A", value)
+			if !duplicateExists || shouldReplaceExisting(ri, existingARecordIntent, logger) {
 				desiredByNameType.Get(name).Get("A").Set(value, ri)
 			}
 		} else if _, ok := record.(*dns.CNAMERecord); ok {
-			if hasARecords {
-				// Get existing A records (more than one may exist)
-				if shouldReplaceAllExisting(ri, existingARecordIntents, logger) {
-					// Remoev all A records with the name and add a CNAME record
-					desiredByNameType.DeleteNameType(name, "A")
-					desiredByNameType.Get(name).Get("CNAME").Set(value, ri)
-				}
-			} else if hasCNAMERecords {
+			if existingCNAMERecordIntents, exists := desiredByNameType.PeekNameTypeRecords(name, "CNAME"); exists {
 				// Get existing CNAME record - assume only one
 				existingCNAMERecordIntent := existingCNAMERecordIntents[0]
 				if shouldReplaceExisting(ri, existingCNAMERecordIntent, logger) {
 					// Replace CNAME record
+					// Just calling the "Set" function isn't enough to prevent multiple CNAME records with different values
+					desiredByNameType.Get(name).Get("CNAME").Delete(existingCNAMERecordIntent.Record.GetValue())
 					desiredByNameType.Get(name).Get("CNAME").Set(value, ri)
 				}
 			} else {
@@ -151,7 +127,34 @@ func FilterRecordIntents(recordIntents []*intent.RecordIntent, logger zerolog.Lo
 		}
 	}
 
-	return desiredByNameType.GetAllValues()
+	desiredByNameTypeDeduplicated := NewNestedRecordMap()
+	for _, name := range desiredByNameType.GetAllNames() {
+		aRecords, aRecordsExist := desiredByNameType.PeekNameTypeRecords(name, "A")
+		cnameRecords, cnameRecordsExist := desiredByNameType.PeekNameTypeRecords(name, "CNAME")
+		if aRecordsExist && !cnameRecordsExist {
+			// Transfer all A records into the "desired by name type deduplicated" set
+			for _, ri := range aRecords {
+				desiredByNameTypeDeduplicated.Get(name).Get("A").Set(ri.Record.GetValue(), ri)
+			}
+		} else if cnameRecordsExist && !aRecordsExist {
+			// Transfer the CNAME record into the "desired by name type deduplicated" set
+			ri := cnameRecords[0]
+			desiredByNameTypeDeduplicated.Get(name).Get("CNAME").Set(ri.Record.GetValue(), ri)
+		} else if aRecordsExist && cnameRecordsExist {
+			cnameRecord := cnameRecords[0]
+			if shouldReplaceAllExisting(cnameRecord, aRecords, logger) {
+				desiredByNameTypeDeduplicated.Get(name).Get("CNAME").Set(cnameRecord.Record.GetValue(), cnameRecord)
+			} else {
+				for _, ri := range aRecords {
+					desiredByNameTypeDeduplicated.Get(name).Get("A").Set(ri.Record.GetValue(), ri)
+				}
+			}
+		} else {
+			logger.Warn().Str("name", name).Msg("Found a record name with no CNAME or A records. Skipping it.")
+		}
+	}
+
+	return desiredByNameTypeDeduplicated.GetAllValues()
 }
 
 func ReconcileAndValidate(desired, actual []*intent.RecordIntent, logger zerolog.Logger) ([]*intent.RecordIntent, []*intent.RecordIntent) {
