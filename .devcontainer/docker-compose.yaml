@@ -32,7 +32,7 @@ services:
       - ETCD_INITIAL_CLUSTER=etcd=http://etcd:2380
       - ETCD_INITIAL_CLUSTER_STATE=new
       - ETCD_NAME=etcd
-      - HISTFILE=/.bash_history
+      - HISTFILE=/.shell_history/bash_history
       - HISTSIZE=10000
       - SAVEHIST=10000
     ports:
