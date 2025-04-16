@@ -48,11 +48,11 @@ func (se *SyncEngine) prepopulateState(ctx context.Context) error {
 		intents, err := GetContainerRecordIntents(evt, se.cfg, se.logger)
 		if err != nil {
 			se.logger.Error().Err(err).Msg("Error building record intents during prepopulation")
-			continue // or return err, depending on desired behavior
+			continue
 		}
 		if len(intents) > 0 {
 			se.stateTracker.Upsert(evt.ID, evt.Name, evt.Created, intents, "running")
-			se.logger.Info().Msgf("Prepopulated state for container %s", evt.ID)
+			se.logger.Info().Msgf("Prepopulated state for container %s", container.Name)
 		}
 	}
 	return nil
