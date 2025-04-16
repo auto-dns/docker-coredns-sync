@@ -1,7 +1,7 @@
 .PHONY: build build-dev push up down init-env release unrelease dev-init test lint format check format-imports
 
 PROJECT_NAME := docker-coredns-sync
-IMAGE := ghcr.io/$(shell echo $(USER) | tr '[:upper:]' '[:lower:]')/$(PROJECT_NAME)
+IMAGE := ghcr.io/stevenc4/$(PROJECT_NAME)
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo latest)
 
 # Default to prod build

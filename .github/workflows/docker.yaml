@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'  # e.g. v0.1.0
+      - 'v*.*.*-*'  # e.g. v0.1.0-beta.1
 
 env:
   REGISTRY: ghcr.io
@@ -36,15 +37,19 @@ jobs:
       - name: Extract version from tag
         id: version
         run: |
-          version="${GITHUB_REF#refs/tags/v}"
+          full="${GITHUB_REF#refs/tags/v}"
+          version="${full%%-*}"         # e.g. "1.2.3"
+          prerelease="${full#"$version"}"  # e.g. "-beta.1" or "" if none
           major=$(echo "$version" | cut -d. -f1)
           minor=$(echo "$version" | cut -d. -f2)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          echo "version=$full" >> "$GITHUB_OUTPUT"
           echo "major=$major" >> "$GITHUB_OUTPUT"
           echo "minor=$minor" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push multi-arch image
-        id: push
+      - name: Build and push image with full version tag
+        id: push-full
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -53,6 +58,16 @@ jobs:
           provenance: true
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}
+
+      - name: Build and push major/minor/latest tags for stable releases only
+        if: steps.version.outputs.prerelease == ''
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          provenance: false
+          tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}.${{ steps.version.outputs.minor }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.major }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
@@ -61,5 +76,5 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          subject-digest: ${{ steps.push.outputs.digest }}
+          subject-digest: ${{ steps.push-full.outputs.digest }}
           push-to-registry: true
