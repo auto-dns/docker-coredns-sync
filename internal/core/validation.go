@@ -21,35 +21,36 @@ func ValidateRecord(newRecordIntent *intent.RecordIntent, existingRecordIntents 
 	_, isCname := newRecord.(*dns.CNAMERecord)
 	_, isA := newRecord.(*dns.ARecord)
 
-	var existingRecords []*dns.Record
-	var sameNameRecords []*dns.Record
-	var aRecords []*dns.Record
+	sameNameARecordsExist := false
 	identicalARecordExists := false
-	var cnameRecords []*dns.Record
+	sameNameCNAMERecordsExist := false
+	// Forward map used for CNAME cycle detection
+	forwardMap := make(map[string]string)
 	for _, ri := range existingRecordIntents {
-		ri := ri
-		existingRecords = append(existingRecords, &ri.Record)
-		if ri.Record.GetName() == newRecord.GetName() {
-			sameNameRecords = append(sameNameRecords, &ri.Record)
-			if isA {
-				aRecords = append(aRecords, &ri.Record)
-				if ri.Record.GetValue() == newRecord.GetValue() {
-					identicalARecordExists = true
-				}
+		r := ri.Record
+		sameName := r.GetName() == newRecord.GetName()
+		if _, ok := r.(*dns.ARecord); ok {
+			sameNameARecordsExist = sameNameARecordsExist || sameName
+			identicalARecordExists = identicalARecordExists || sameName && r.GetValue() == newRecord.GetValue()
+		} else if _, ok := r.(*dns.CNAMERecord); ok {
+			sameNameCNAMERecordsExist = sameNameCNAMERecordsExist || sameName
+			if _, exists := forwardMap[r.GetName()]; exists {
+				logger.Warn().Msg(fmt.Sprintf("Duplicate CNAME definitions detected in remote registry for domain %s", r.GetName()))
+			} else {
+				forwardMap[r.GetName()] = r.GetValue()
 			}
-			if isCname {
-				cnameRecords = append(cnameRecords, &ri.Record)
-			}
+		} else {
+			logger.Warn().Msg(fmt.Sprintf("Unknown record type in existing records: %s", ri.Record.GetType()))
 		}
 	}
 
 	// Rule 1: A and CNAME with same name not allowed
 	if isA {
-		if len(cnameRecords) > 0 {
+		if sameNameCNAMERecordsExist {
 			return NewRecordValidationError(fmt.Sprintf("%s -> %s - cannot add an A record when a CNAME record exists with the same name", newRecord.GetName(), newRecord.GetValue()))
 		}
 	} else if isCname {
-		if len(aRecords) > 0 {
+		if sameNameARecordsExist {
 			return NewRecordValidationError(fmt.Sprintf("%s -> %s - cannot add a CNAME record when an A record exists with the same name", newRecord.GetName(), newRecord.GetValue()))
 		}
 	} else {
@@ -57,7 +58,7 @@ func ValidateRecord(newRecordIntent *intent.RecordIntent, existingRecordIntents 
 	}
 
 	// Rule 2: Multiple CNAMEs with same name not allowed
-	if isCname && len(cnameRecords) > 0 {
+	if isCname && sameNameCNAMERecordsExist {
 		return NewRecordValidationError(fmt.Sprintf("%s -> %s - multiple CNAME records with the same name are not allowed", newRecord.GetName(), newRecord.GetValue()))
 	}
 
@@ -68,17 +69,6 @@ func ValidateRecord(newRecordIntent *intent.RecordIntent, existingRecordIntents 
 
 	// Rule 4: Detect cycles
 	if isCname {
-		forwardMap := make(map[string]string)
-		for _, r := range existingRecords {
-			r := r
-			if _, ok := (*r).(*dns.CNAMERecord); ok {
-				if _, exists := forwardMap[(*r).GetName()]; exists {
-					logger.Warn().Msg(fmt.Sprintf("Duplicate CNAME definitions detected in remote registry for domain %s", (*r).GetName()))
-					continue
-				}
-			}
-			forwardMap[(*r).GetName()] = (*r).GetValue()
-		}
 		forwardMap[newRecord.GetName()] = newRecord.GetValue()
 
 		// Process to detect loops
