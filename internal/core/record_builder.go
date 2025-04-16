@@ -51,7 +51,7 @@ func GetContainerRecordIntents(event ContainerEvent, settings *config.AppConfig,
 			continue
 		}
 
-		recordType := parts[1]
+		recordType := strings.ToUpper(parts[1])
 		// Check if recordType is allowed.
 		allowed := false
 		for _, rt := range settings.AllowedRecordTypes {
