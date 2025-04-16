@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/events"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/rs/zerolog"
@@ -11,9 +12,9 @@ import (
 
 type dockerClient interface {
 	Events(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error)
+	ContainerList(ctx context.Context, options container.ListOptions) ([]container.Summary, error)
 	Close() error
 }
-
 type DockerWatcherImpl struct {
 	logger zerolog.Logger
 	cli    dockerClient
@@ -26,9 +27,9 @@ func NewDockerWatcherImpl(cli dockerClient, logger zerolog.Logger) DockerWatcher
 	}
 }
 
-// Subscribe connects to the Docker event stream and converts events into ContainerEvent objects.
 func (dw *DockerWatcherImpl) Subscribe(ctx context.Context) (<-chan ContainerEvent, error) {
-	out := make(chan ContainerEvent)
+	const bufferSize = 100 // TODO: config this
+	out := make(chan ContainerEvent, bufferSize)
 
 	// Create a filter: we listen for container events.
 	filterArgs := filters.NewArgs()
@@ -80,7 +81,28 @@ func (dw *DockerWatcherImpl) Subscribe(ctx context.Context) (<-chan ContainerEve
 	return out, nil
 }
 
-// Stop closes the Docker client. (You can rely on context cancellation for stopping events.)
+func (dw *DockerWatcherImpl) ListRunningContainers(ctx context.Context) ([]ContainerEvent, error) {
+	opts := container.ListOptions{All: false}
+	containers, err := dw.cli.ContainerList(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
+	var events []ContainerEvent
+	for _, c := range containers {
+		// Here, we assume at least one name is present. You might need
+		// to adjust this logic if there can be more than one.
+		evt := ContainerEvent{
+			ID:      c.ID,
+			Name:    c.Names[0],
+			Status:  "running",
+			Created: time.Unix(c.Created, 0),
+			Labels:  c.Labels,
+		}
+		events = append(events, evt)
+	}
+	return events, nil
+}
+
 func (dw *DockerWatcherImpl) Stop() {
 	dw.logger.Info().Msg("Stopping Docker watcher")
 	_ = dw.cli.Close()
