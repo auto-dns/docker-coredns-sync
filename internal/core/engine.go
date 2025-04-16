@@ -80,20 +80,42 @@ func (se *SyncEngine) handleEvent(evt ContainerEvent) {
 }
 
 func (se *SyncEngine) Run(ctx context.Context) error {
-	se.logger.Info().Msg("SyncEngine starting")
+	se.logger.Info().Msg("Starting SyncEngine")
 
 	// Step 1: Subscribe to Docker events (assume this is done elsewhere)
 	eventCh, err := se.watcher.Subscribe(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to Docker events: %w", err)
+		return fmt.Errorf("Failed to subscribe to Docker events: %w", err)
 	}
 
 	// Step 2: Prepopulate state by listing running containers.
+	se.logger.Info().Msg("Prepopulating the state with currently running containers")
 	if err := se.prepopulateState(ctx); err != nil {
 		se.logger.Error().Err(err).Msg("Error during state prepopulation")
 	}
 
-	// Launch a goroutine to process incoming events and update the state tracker.
+	// Step 3. Drain any events that arrived during prepopulation.
+	// Use a non-blocking drain loop with a short timeout.
+	se.logger.Info().Msg("Draining events that arrived during container prepopulation")
+	drainTimeout := time.After(500 * time.Millisecond)
+	drained := false
+	for !drained {
+		select {
+		case evt, ok := <-eventCh:
+			if !ok {
+				se.logger.Info().Msg("Queue drained")
+				drained = true
+				break
+			}
+			se.handleEvent(evt)
+		case <-drainTimeout:
+			se.logger.Info().Msg("Drain timeout reached")
+			drained = true
+		}
+	}
+
+	// Step 4: Launch a goroutine to process incoming events and update the state tracker.
+	se.logger.Info().Msg("Launching event processing goroutine")
 	go func() {
 		for {
 			select {
@@ -110,7 +132,8 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 		}
 	}()
 
-	// Main reconciliation loop.
+	// Step 5: Launch the main reconciliation loop.
+	se.logger.Info().Msg("Launching reconciliation loop")
 	ticker := time.NewTicker(time.Duration(se.cfg.PollInterval) * time.Second)
 	defer ticker.Stop()
 	for {
@@ -120,7 +143,7 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 			err := se.registry.LockTransaction(ctx, []string{"__global__"}, func() error {
 				actual, err := se.registry.List(ctx)
 				if err != nil {
-					return fmt.Errorf("error listing registry records: %w", err)
+					return fmt.Errorf("Error listing registry records: %w", err)
 				}
 				desired := se.stateTracker.GetAllDesiredRecordIntents()
 				// Filter out any internally inconsistent intents:
@@ -139,7 +162,7 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 				return nil
 			})
 			if err != nil {
-				se.logger.Error().Err(err).Msg("[sync_engine] Sync error")
+				se.logger.Error().Err(err).Msg("Sync error")
 			}
 		case <-ctx.Done():
 			se.logger.Info().Msg("SyncEngine shutting down")
