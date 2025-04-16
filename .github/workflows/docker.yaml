@@ -6,7 +6,6 @@ on:
       - 'v*.*.*'  # e.g. v0.1.0
 
 env:
-  env:
   REGISTRY: ghcr.io
   IMAGE_NAME: stevenc4/docker-coredns-sync
 
@@ -49,7 +48,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           provenance: true
           tags: |

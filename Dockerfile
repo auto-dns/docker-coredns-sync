@@ -43,6 +43,8 @@ CMD ["sleep", "infinity"]
 # ===== Stage 3: Release (Runtime) =====
 FROM alpine:3.21 AS release
 RUN apk add --no-cache ca-certificates
+# Debug tools
+RUN apk add --no-cache bash curl bind-tools procps
 WORKDIR /app
 
 # Copy the statically built binary from the builder stage.
