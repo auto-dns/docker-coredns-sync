@@ -4,6 +4,6 @@ services:
     container_name: docker-coredns-sync
     restart: unless-stopped
     env_file:
-      - ../.env
+      - .env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
