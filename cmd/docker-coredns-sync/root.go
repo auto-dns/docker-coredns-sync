@@ -16,20 +16,26 @@ import (
 	"github.com/StevenC4/docker-coredns-sync/internal/logger"
 )
 
+type contextKey string
+
+const configKey = contextKey("config")
+
 var rootCmd = &cobra.Command{
 	Use:   "docker-coredns-sync",
 	Short: "Synchronize Docker and CoreDNS via etcd",
 	Long:  "A tool to synchronize container events with DNS records using etcd as a backend.",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		// Initialize configuration from file and environment.
-		return config.InitConfig()
+		cfg, err := config.Load()
+		if err != nil {
+			return err
+		}
+		ctx := context.WithValue(cmd.Context(), configKey, cfg)
+		cmd.SetContext(ctx)
+		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Load configuration.
-		cfg, err := config.Load()
-		if err != nil {
-			return fmt.Errorf("error loading configuration: %w", err)
-		}
+		cfg := cmd.Context().Value(configKey).(*config.Config)
 
 		// Set up logger.
 		logInstance := logger.SetupLogger(&cfg.Logging)
