@@ -170,7 +170,7 @@ func ReconcileAndValidate(desired, actual []*intent.RecordIntent, logger zerolog
 	// Step 1: Remove stale records and build lookup structure
 	for _, ri := range actual {
 		if _, exists := desiredSet[ri.Key()]; !exists {
-			logger.Info().Msgf("[reconciler] Removing stale record: %s (owned by %s/%s)",
+			logger.Info().Msgf("Removing stale record: %s (owned by %s/%s)",
 				ri.Record.Render(), ri.Hostname, ri.ContainerName)
 			toRemoveMap[ri.Key()] = ri
 		} else {
@@ -293,13 +293,13 @@ func ReconcileAndValidate(desired, actual []*intent.RecordIntent, logger zerolog
 
 		// Step 4: Validate and commit
 		if err := ValidateRecord(desiredRecordIntent, simulated, logger); err == nil {
-			logger.Info().Msgf("[reconciler] Adding new record: %s", desiredRecordIntent.Render())
+			logger.Info().Msgf("Adding new record: %s", desiredRecordIntent.Render())
 			toAddMap[desiredRecordIntent.Record.Key()] = desiredRecordIntent
 			for k, v := range evictions {
 				toRemoveMap[k] = v
 			}
 		} else {
-			logger.Warn().Err(err).Msgf("[reconciler] Skipping invalid record %s", desiredRecordIntent.Record.Render())
+			logger.Warn().Err(err).Msgf("Skipping invalid record %s", desiredRecordIntent.Record.Render())
 		}
 	}
 
