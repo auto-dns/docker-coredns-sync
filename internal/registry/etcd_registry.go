@@ -208,7 +208,7 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *intent.RecordIntent) err
 		keyStr := string(kv.Key)
 		var data map[string]interface{}
 		if err := json.Unmarshal(kv.Value, &data); err != nil {
-			er.logger.Warn().Err(err).Msgf("[etcd_registry] Could not parse key %s", keyStr)
+			er.logger.Warn().Err(err).Msgf("Could not parse key %s", keyStr)
 			continue
 		}
 		// Match based on record fields.
@@ -218,10 +218,10 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *intent.RecordIntent) err
 			data["owner_container_name"] == ri.ContainerName {
 			_, err := er.client.Delete(ctx, keyStr)
 			if err != nil {
-				er.logger.Warn().Err(err).Msgf("[etcd_registry] Failed to delete key %s", keyStr)
+				er.logger.Warn().Err(err).Msgf("Failed to delete key %s", keyStr)
 				return err
 			}
-			er.logger.Info().Msgf("[etcd_registry] Deleted key %s", keyStr)
+			er.logger.Info().Msgf("Deleted key %s", keyStr)
 			return nil
 		}
 	}
@@ -240,7 +240,7 @@ func (er *EtcdRegistry) List(ctx context.Context) ([]*intent.RecordIntent, error
 		keyStr := string(kv.Key)
 		ri, err := er.parseEtcdValue(keyStr, string(kv.Value))
 		if err != nil {
-			er.logger.Error().Err(err).Msgf("[etcd_registry] Failed to parse key: %s", keyStr)
+			er.logger.Error().Err(err).Msgf("Failed to parse key: %s", keyStr)
 			continue
 		}
 		intents = append(intents, ri)
