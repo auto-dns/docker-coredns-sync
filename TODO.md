@@ -1,10 +1,6 @@
 # Todo
 
 ## Features
-* Better dev environment
-  * Decouple from production etcd instance (maybe a docker-compose file for the dev environment that defines the devcontainer as well as dependencies - an etcd instance, a coredns instance, etc.)
-    * May have some ways to preconfigure different datasets into the etcd instance (either automatically or via makefile scripts - as well as an easy way to reset the etcd state)
-	* This way, I can test it and do development on my macbook. That way I don't have to stop the prod instance, spin up a dev container on the remote prod instance, and test it against the production etcd instance. This avoids impact on my production DNS resolution
 * Incorporate metrics into everywhere that may be relevant
 
 ## Edge cases
