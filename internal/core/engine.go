@@ -148,7 +148,7 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 				desired := se.stateTracker.GetAllDesiredRecordIntents()
 				// Filter out any internally inconsistent intents:
 				desiredReconciled := FilterRecordIntents(desired, se.logger)
-				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.logger)
+				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, se.logger)
 				for _, rec := range toRemove {
 					if err := se.registry.Remove(ctx, rec); err != nil {
 						se.logger.Error().Err(err).Msg("Error removing record")
