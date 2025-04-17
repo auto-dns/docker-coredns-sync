@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   docker-coredns-sync-dev:
     container_name: docker-coredns-sync-dev
@@ -10,21 +8,21 @@ services:
     volumes:
       - ../:/workspace:cached
       - /var/run/docker.sock:/var/run/docker.sock
-      - ../coredns:/etc/coredns:ro
-    env_file:
-      - .env
+      - docker_coredns_sync_shell_history:/home/vscode/.shell_history
+      - go_modules:/home/vscode/go
+      - go_cache:/home/vscode/.cache/go-build
     environment:
-      - ETCD_URL=http://etcd
-      - ETCD_PATH_PREFIX=/v2/keys/skydns
+      - HISTFILE=/home/vscode/.shell_history/zsh_history
+      - HISTSIZE=10000
+      - SAVEHIST=10000
     depends_on:
       - etcd
       - coredns
-    ports:
-      - "5678:5678"  # For debugpy or other dev services
 
   etcd:
     image: bitnami/etcd:latest
     container_name: etcd
+    hostname: etcd
     environment:
       - ALLOW_NONE_AUTHENTICATION=yes
       - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
@@ -34,17 +32,32 @@ services:
       - ETCD_INITIAL_CLUSTER=etcd=http://etcd:2380
       - ETCD_INITIAL_CLUSTER_STATE=new
       - ETCD_NAME=etcd
+      - HISTFILE=/.shell_history/bash_history
+      - HISTSIZE=10000
+      - SAVEHIST=10000
     ports:
       - "2379:2379"
       - "2380:2380"
     volumes:
       - ./etcd:/bitnami/etcd
+      - etcd_history:/.shell_history
+    user: root
 
   coredns:
     image: coredns/coredns:1.12.1
     container_name: coredns
     command: -conf /etc/coredns/Corefile
     volumes:
-      - ../coredns:/etc/coredns:ro
+      - ./coredns:/etc/coredns:ro
     ports:
       - "5336:5336/udp"
+
+volumes:
+  # shell history
+  docker_coredns_sync_shell_history: {}
+  etcd_history: {}
+  # etcd data
+  etcd: {}
+  # docker-coredns-sync
+  go_modules: {}
+  go_cache: {}
