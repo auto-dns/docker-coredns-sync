@@ -39,6 +39,7 @@ unrelease:
 	git push --delete origin v$(VERSION)
 
 dev-init:
+	@touch config.yaml
 	@mkdir -p .devcontainer
 	@mkdir -p .devcontainer/etcd
 	@if [ ! -f .devcontainer/.env ]; then \
