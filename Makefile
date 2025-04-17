@@ -1,16 +1,16 @@
-.PHONY: build build-dev push up down init-env release unrelease dev-init
+.PHONY: build build-dev push up down init-env release unrelease dev-init test lint format check format-imports
 
 PROJECT_NAME := docker-coredns-sync
-IMAGE := ghcr.io/$(shell echo $(USER) | tr '[:upper:]' '[:lower:]')/$(PROJECT_NAME)
+IMAGE := ghcr.io/stevenc4/$(PROJECT_NAME)
 VERSION ?= $(shell git describe --tags --abbrev=0 2>/dev/null || echo latest)
 
 # Default to prod build
 build:
-	docker build -t $(IMAGE):$(VERSION) --target prod .
+	docker build -t $(IMAGE):$(VERSION) --target release -f ./Dockerfile .
 
 # Dev container build (optional)
 build-dev:
-	docker build -t $(IMAGE):dev --target dev .
+	docker build -t $(IMAGE):dev --target dev -f ./Dockerfile .
 
 # Push image
 push:
@@ -40,6 +40,7 @@ unrelease:
 
 dev-init:
 	@mkdir -p .devcontainer
+	@mkdir -p .devcontainer/etcd
 	@if [ ! -f .devcontainer/.env ]; then \
 		UNAME_S=$$(uname -s); \
 		if [ "$$UNAME_S" = "Darwin" ]; then \
@@ -47,7 +48,7 @@ dev-init:
 		else \
 			HOST_IP=$$(ip route get 1 | awk '{print $$NF; exit}'); \
 		fi; \
-		echo "ETCD_HOST=http://etcd" >> .devcontainer/.env; \
+		echo "ETCD_HOST=etcd" >> .devcontainer/.env; \
 		echo "HOST_IP=$$HOST_IP" > .devcontainer/.env; \
 		echo "HOSTNAME=$$(hostname)" >> .devcontainer/.env; \
 		echo "LOG_LEVEL=DEBUG" >> .devcontainer/.env; \
@@ -55,3 +56,18 @@ dev-init:
 	else \
 		echo ".devcontainer/.env already exists. Skipping."; \
 	fi
+
+test:
+	pytest tests
+
+lint:
+	ruff check src tests
+	mypy src tests
+
+format:
+	black src tests
+
+check: lint test
+
+format-imports:
+	ruff format src tests
