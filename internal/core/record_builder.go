@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/StevenC4/docker-coredns-sync/internal/config"
@@ -21,11 +22,11 @@ func getForce(labels map[string]string, containerForceLabel, recordForceLabel st
 }
 
 // GetContainerRecordIntents parses the container event's labels and returns record intents.
-func GetContainerRecordIntents(event ContainerEvent, settings *config.AppConfig, logger zerolog.Logger) ([]*intent.RecordIntent, error) {
+func GetContainerRecordIntents(event ContainerEvent, cfg *config.AppConfig, logger zerolog.Logger) ([]*intent.RecordIntent, error) {
 	var intents []*intent.RecordIntent
 
 	labels := event.Labels
-	prefix := settings.DockerLabelPrefix
+	prefix := cfg.DockerLabelPrefix
 
 	// If the feature is disabled in labels, return empty.
 	if strings.ToLower(labels[prefix+".enabled"]) != "true" {
@@ -54,7 +55,7 @@ func GetContainerRecordIntents(event ContainerEvent, settings *config.AppConfig,
 		recordType := strings.ToUpper(parts[1])
 		// Check if recordType is allowed.
 		allowed := false
-		for _, rt := range settings.AllowedRecordTypes {
+		for _, rt := range cfg.AllowedRecordTypes {
 			if recordType == rt {
 				allowed = true
 				break
@@ -90,70 +91,97 @@ func GetContainerRecordIntents(event ContainerEvent, settings *config.AppConfig,
 	containerID := event.ID
 	containerName := event.Name
 	containerCreated := event.Created
-	hostname := settings.Hostname
+	hostname := cfg.Hostname
 	containerForceLabel := prefix + ".force"
 
 	// Process base label pairs for A records.
-	if aLabels, exists := baseLabelPairs["A"]; exists {
-		if name, ok := aLabels["name"]; ok {
-			var value string
-			if v, ok := aLabels["value"]; ok {
-				value = v
-			} else {
-				value = settings.HostIP
+	for recordType, kv := range baseLabelPairs {
+		name, nameOk := kv["name"]
+		value, valueOk := kv["value"]
+		if !nameOk {
+			logger.Warn().Msgf("Skipping - %s.%s.value label found with no matching name", prefix, recordType)
+			continue
+		}
+		if !valueOk {
+			if recordType == "A" {
+				value = cfg.HostIP
 				logger.Warn().Msgf("%s.A.name label found with no matching %s.A.value. Using host IP %s", prefix, prefix, value)
+			} else {
+				logger.Warn().Msgf("Skipping - %s.%s.name label found with no matching value", prefix, recordType)
+				continue
 			}
-			force := getForce(labels, containerForceLabel, prefix+".A.force")
-			aRec, err := dns.NewARecord(name, value)
+		}
+
+		var rec dns.Record
+		var err error
+		force := getForce(labels, containerForceLabel, fmt.Sprintf("%s.%s.force", prefix, strings.ToLower(recordType)))
+
+		switch recordType {
+		case "A":
+			rec, err = dns.NewARecord(name, value)
+		case "CNAME":
+			rec, err = dns.NewCNAMERecord(name, value)
+		default:
+			logger.Warn().Msgf("Unsupported record type %s", recordType)
+			continue
+		}
+
+		if err != nil {
+			logger.Warn().Msgf("Invalid %sRecord: %v", recordType, err)
+			continue
+		}
+
+		intent := &intent.RecordIntent{
+			ContainerID:   containerID,
+			ContainerName: containerName,
+			Created:       containerCreated,
+			Force:         force,
+			Hostname:      hostname,
+			Record:        rec,
+		}
+		recordIntents = append(recordIntents, intent)
+	}
+
+	// Process aliased label pairs for all record types
+	for recordType, aliases := range aliasedLabelPairs {
+		for alias, kv := range aliases {
+			name, nameOk := kv["name"]
+			value, valueOk := kv["value"]
+			if !nameOk || !valueOk {
+				logger.Warn().Msgf("Skipping alias %s for type %s due to missing name or value", alias, recordType)
+				continue
+			}
+
+			var rec dns.Record
+			var err error
+			force := getForce(labels, containerForceLabel, fmt.Sprintf("%s.%s.%s.force", prefix, strings.ToLower(recordType), alias))
+
+			switch recordType {
+			case "A":
+				rec, err = dns.NewARecord(name, value)
+			case "CNAME":
+				rec, err = dns.NewCNAMERecord(name, value)
+			default:
+				logger.Warn().Msgf("Unsupported record type %s for alias %s", recordType, alias)
+				continue
+			}
+
 			if err != nil {
-				logger.Warn().Msgf("Invalid ARecord %s: %v", name, err)
-			} else {
-				intent := &intent.RecordIntent{
-					ContainerID:   containerID,
-					ContainerName: containerName,
-					Created:       containerCreated,
-					Force:         force,
-					Hostname:      hostname,
-					Record:        aRec,
-				}
-				recordIntents = append(recordIntents, intent)
+				logger.Warn().Msgf("Invalid %sRecord for alias %s: %v", recordType, alias, err)
+				continue
 			}
-		} else if _, exists := aLabels["value"]; exists {
-			logger.Error().Msgf("%s.A.value label found with no matching %s.A.name", prefix, prefix)
+
+			intent := &intent.RecordIntent{
+				ContainerID:   containerID,
+				ContainerName: containerName,
+				Created:       containerCreated,
+				Force:         force,
+				Hostname:      hostname,
+				Record:        rec,
+			}
+			recordIntents = append(recordIntents, intent)
 		}
 	}
-
-	// Process base label pairs for CNAME records.
-	if cnameLabels, exists := baseLabelPairs["CNAME"]; exists {
-		if name, nameOk := cnameLabels["name"]; nameOk {
-			if value, valueOk := cnameLabels["value"]; valueOk {
-				force := getForce(labels, containerForceLabel, prefix+".CNAME.force")
-				cnameRec, err := dns.NewCNAMERecord(name, value)
-				if err != nil {
-					logger.Warn().Msgf("Invalid CNAMERecord %s: %v", name, err)
-				} else {
-					intent := &intent.RecordIntent{
-						ContainerID:   containerID,
-						ContainerName: containerName,
-						Created:       containerCreated,
-						Force:         force,
-						Hostname:      hostname,
-						Record:        cnameRec,
-					}
-					recordIntents = append(recordIntents, intent)
-				}
-			} else {
-				logger.Error().Msgf("%s.CNAME.name label found with no matching %s.CNAME.value", prefix, prefix)
-			}
-		} else if _, exists := cnameLabels["value"]; exists {
-			logger.Error().Msgf("%s.CNAME.value label found with no matching %s.CNAME.name", prefix, prefix)
-		}
-	}
-
-	// Process aliased label pairs similarly...
-	// [Omitted for brevity. Follow similar pattern: iterate over each alias,
-	// validate presence of both "name" and "value", construct the record,
-	// determine force, and append to recordIntents.]
 
 	return recordIntents, nil
 }
