@@ -13,6 +13,7 @@ import (
 	"github.com/StevenC4/docker-coredns-sync/internal/config"
 	"github.com/StevenC4/docker-coredns-sync/internal/dns"
 	"github.com/StevenC4/docker-coredns-sync/internal/intent"
+	"github.com/StevenC4/docker-coredns-sync/internal/util"
 	"github.com/rs/zerolog"
 )
 
@@ -44,14 +45,10 @@ func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string,
 
 // getNextIndexedKey generates a new etcd key for a record based on its fully qualified domain name (fqdn).
 func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (string, error) {
-	// Build the base key: reverse the hostname parts.
 	trimmed := strings.Trim(fqdn, ".")
 	parts := strings.Split(trimmed, ".")
-	// Reverse parts.
-	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
-		parts[i], parts[j] = parts[j], parts[i]
-	}
-	baseKey := fmt.Sprintf("%s/%s", er.cfg.PathPrefix, strings.Join(parts, "/"))
+	parts_reversed := util.Reverse(parts)
+	baseKey := fmt.Sprintf("%s/%s", er.cfg.PathPrefix, strings.Join(parts_reversed, "/"))
 	existingIndices := make(map[int]struct{})
 
 	resp, err := er.client.Get(ctx, baseKey, clientv3.WithPrefix())
@@ -66,6 +63,12 @@ func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (str
 			continue
 		}
 		suffix := keyStr[idx+1:]
+		base := keyStr[:idx]
+
+		if base != baseKey {
+			continue
+		}
+
 		if strings.HasPrefix(suffix, "x") {
 			numStr := suffix[1:]
 			num, err := strconv.Atoi(numStr)
