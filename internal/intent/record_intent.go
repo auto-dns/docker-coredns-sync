@@ -28,8 +28,6 @@ func (ri RecordIntent) Equal(other RecordIntent) bool {
 		ri.Record.Equal(other.Record)
 }
 
-// TODO: maybe a record pointer receiver?
-
 func (ri RecordIntent) Key() string {
 	return fmt.Sprintf("%s|%s|%s|%t|%s", ri.ContainerID, ri.ContainerName, ri.Hostname, ri.Force, ri.Record.Key())
 }
