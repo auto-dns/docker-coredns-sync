@@ -42,21 +42,7 @@ dev-init:
 	@touch config.yaml
 	@mkdir -p .devcontainer
 	@mkdir -p .devcontainer/etcd
-	@if [ ! -f .devcontainer/.env ]; then \
-		UNAME_S=$$(uname -s); \
-		if [ "$$UNAME_S" = "Darwin" ]; then \
-			HOST_IP=$$(ipconfig getifaddr en0); \
-		else \
-			HOST_IP=$$(ip route get 1 | awk '{print $$NF; exit}'); \
-		fi; \
-		echo "ETCD_HOST=etcd" >> .devcontainer/.env; \
-		echo "HOST_IP=$$HOST_IP" > .devcontainer/.env; \
-		echo "HOSTNAME=$$(hostname)" >> .devcontainer/.env; \
-		echo "LOG_LEVEL=DEBUG" >> .devcontainer/.env; \
-		echo "Created .devcontainer/.env with HOST_IP=$$HOST_IP"; \
-	else \
-		echo ".devcontainer/.env already exists. Skipping."; \
-	fi
+	@touch .devcontainer/.env
 
 test:
 	pytest tests
