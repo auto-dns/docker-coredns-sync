@@ -23,25 +23,26 @@ Add these labels to your Docker containers to register DNS records:
 
 ### A Record
 
-* `coredns.a.name=***REMOVED***`
+* `coredns.a.name=foo.example.com`
 * `coredns.a.value=192.168.200.1` -  Optional (defaults to HOST_IP)
 
 ### CNAME Record
 
-* `coredns.cname.name=***REMOVED***`
-* `coredns.cname.value=***REMOVED***`
+* `coredns.cname.name=bar.example.com`
+* `coredns.cname.value=foo.example.com`
 
 ### Multiple Records
 
 You can define multiple A or CNAME records by appending numeric indices:
 
-* `coredns.a.1.name=***REMOVED***`
+* `coredns.a.1.name=foo.example.com`
 * `coredns.a.1.value=192.168.200.2`
-* `coredns.cname.2.name=***REMOVED***`
-* `coredns.cname.2.value=***REMOVED***`
+* `coredns.cname.2.name=bar.example.com`
+* `coredns.cname.2.value=foo.example.com`
 
 ### Optional
-* `coredns.force=true` — Forces registration even if the record already exists and is owned by this host.
+* `coredns.a.name.force=true` — Forces registration even if the record already exists and is owned by this host - applies to the specific a record to which it's added.
+* `coredns.force=true` — Forces registration even if the record already exists and is owned by this host - applies to all records defined on the labels on the docker container.
 
 ---
 
@@ -71,7 +72,7 @@ Records are stored in etcd using SkyDNS naming format:
 
 Key:
 ```
-***REMOVED***
+com/example/foo/x1
 ```
 
 Value:
@@ -87,14 +88,14 @@ Value:
 
 Key:
 ```
-***REMOVED***
+com/example/bar/x1
 ```
 
 Value:
 ```json
 {
   "record_type": "CNAME",
-  "host": "***REMOVED***",
+  "host": "foo.example.com",
   "owner": "mozart"
 }
 ```
@@ -109,7 +110,7 @@ Example CoreDNS configuration for dynamic resolution via etcd:
 
 ```hcl
 .:5335 {
-    etcd ***REMOVED*** {
+    etcd example.com {
         path /skydns
         endpoint http://127.0.0.1:2379
         fallthrough
@@ -131,7 +132,7 @@ Install dependencies and run:
 
 ```bash
 pip install -r requirements.txt
-python3 -m src.main
+python3 -m main
 ```
 
 The sync script:
