@@ -1,6 +1,7 @@
 package core
 
 import (
+	"github.com/StevenC4/docker-coredns-sync/internal/config"
 	"github.com/StevenC4/docker-coredns-sync/internal/dns"
 	"github.com/StevenC4/docker-coredns-sync/internal/intent"
 	"github.com/rs/zerolog"
@@ -157,7 +158,7 @@ func FilterRecordIntents(recordIntents []*intent.RecordIntent, logger zerolog.Lo
 	return desiredByNameTypeDeduplicated.GetAllValues()
 }
 
-func ReconcileAndValidate(desired, actual []*intent.RecordIntent, logger zerolog.Logger) ([]*intent.RecordIntent, []*intent.RecordIntent) {
+func ReconcileAndValidate(desired, actual []*intent.RecordIntent, cfg *config.AppConfig, logger zerolog.Logger) ([]*intent.RecordIntent, []*intent.RecordIntent) {
 	toAddMap := map[string]*intent.RecordIntent{}
 	toRemoveMap := map[string]*intent.RecordIntent{}
 
@@ -170,9 +171,14 @@ func ReconcileAndValidate(desired, actual []*intent.RecordIntent, logger zerolog
 	// Step 1: Remove stale records and build lookup structure
 	for _, ri := range actual {
 		if _, exists := desiredSet[ri.Key()]; !exists {
-			logger.Info().Msgf("Removing stale record: %s (owned by %s/%s)",
-				ri.Record.Render(), ri.Hostname, ri.ContainerName)
-			toRemoveMap[ri.Key()] = ri
+			if ri.Hostname == cfg.Hostname {
+				logger.Info().Msgf("Removing stale record: %s (owned by %s/%s)",
+					ri.Record.Render(), ri.Hostname, ri.ContainerName)
+				toRemoveMap[ri.Key()] = ri
+			} else {
+				logger.Debug().Msgf("Skipping removal of record %s not owned by this host (%s != %s)",
+					ri.Record.Render(), ri.Hostname, cfg.Hostname)
+			}
 		} else {
 			name := ri.Record.GetName()
 			recordType := ri.Record.GetType()
