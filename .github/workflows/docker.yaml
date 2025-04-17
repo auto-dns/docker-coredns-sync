@@ -60,7 +60,6 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           push: true
           provenance: true
-          build-metadata: inline
           cache-from: type=gha
           cache-to: type=gha,mode=max
           tags: |
