@@ -1,4 +1,4 @@
-module github.com/StevenC4/docker-coredns-sync
+module github.com/auto-dns/docker-coredns-sync
 
 go 1.24.2
 
