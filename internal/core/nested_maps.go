@@ -1,8 +1,8 @@
 package core
 
 import (
-	"github.com/StevenC4/docker-coredns-sync/internal/intent"
-	"github.com/StevenC4/docker-coredns-sync/internal/util"
+	"github.com/auto-dns/docker-coredns-sync/internal/intent"
+	"github.com/auto-dns/docker-coredns-sync/internal/util"
 )
 
 // Define struct types

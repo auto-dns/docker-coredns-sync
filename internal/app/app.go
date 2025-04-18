@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/StevenC4/docker-coredns-sync/internal/config"
-	"github.com/StevenC4/docker-coredns-sync/internal/core"
-	"github.com/StevenC4/docker-coredns-sync/internal/registry"
+	"github.com/auto-dns/docker-coredns-sync/internal/config"
+	"github.com/auto-dns/docker-coredns-sync/internal/core"
+	"github.com/auto-dns/docker-coredns-sync/internal/registry"
 	dockerCli "github.com/docker/docker/client"
 	"github.com/rs/zerolog"
 	clientv3 "go.etcd.io/etcd/client/v3"

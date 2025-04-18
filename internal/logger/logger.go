@@ -8,7 +8,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"github.com/StevenC4/docker-coredns-sync/internal/config"
+	"github.com/auto-dns/docker-coredns-sync/internal/config"
 )
 
 // SetupLogger configures zerolog based on the settings, including caller info and additional metadata.
