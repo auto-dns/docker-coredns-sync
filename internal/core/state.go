@@ -45,13 +45,15 @@ func (s *StateTracker) Upsert(containerID, containerName string, created time.Ti
 }
 
 // MarkRemoved marks a container state as removed.
-func (s *StateTracker) MarkRemoved(containerID string) {
+func (s *StateTracker) MarkRemoved(containerID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if state, exists := s.containers[containerID]; exists {
 		state.Status = "removed"
 		state.LastUpdated = time.Now()
+		return true
 	}
+	return false
 }
 
 // GetAllDesiredRecordIntents returns all record intents from running containers.
