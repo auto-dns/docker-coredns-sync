@@ -10,9 +10,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/StevenC4/docker-coredns-sync/internal/app"
-	"github.com/StevenC4/docker-coredns-sync/internal/config"
-	"github.com/StevenC4/docker-coredns-sync/internal/logger"
+	"github.com/auto-dns/docker-coredns-sync/internal/app"
+	"github.com/auto-dns/docker-coredns-sync/internal/config"
+	"github.com/auto-dns/docker-coredns-sync/internal/logger"
 )
 
 type contextKey string
