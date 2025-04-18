@@ -3,7 +3,7 @@ package registry
 import (
 	"context"
 
-	"github.com/StevenC4/docker-coredns-sync/internal/intent"
+	"github.com/auto-dns/docker-coredns-sync/internal/intent"
 )
 
 type Registry interface {

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/StevenC4/docker-coredns-sync/internal/intent"
+	"github.com/auto-dns/docker-coredns-sync/internal/intent"
 )
 
 // ContainerState holds state derived from container events.
