@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/the original repository/internal/config"
-	"github.com/the original repository/internal/registry"
+	"github.com/auto-dns/docker-coredns-sync/internal/config"
+	"github.com/auto-dns/docker-coredns-sync/internal/registry"
 	"github.com/rs/zerolog"
 )
 

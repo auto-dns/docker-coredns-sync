@@ -1,4 +1,4 @@
-module github.com/the original repository
+module github.com/auto-dns/docker-coredns-sync
 
 go 1.24.2
 
