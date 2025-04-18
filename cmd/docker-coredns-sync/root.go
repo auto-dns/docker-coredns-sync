@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -68,13 +67,48 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.PersistentFlags().String("config", "", "config file (default is config.yaml)")
-	rootCmd.PersistentFlags().String("log-level", "INFO", "set log level (e.g. INFO, DEBUG, WARN)")
-	viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log-level"))
+	// Persistent config file override
+	rootCmd.PersistentFlags().String("config", "", "Path to config file (e.g. ./config.yaml)")
+	viper.BindPFlag("config", rootCmd.PersistentFlags().Lookup("config"))
 
-	// Enable automatic environment variable binding.
-	viper.AutomaticEnv()
-	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
+	// AppConfig Flags
+	rootCmd.PersistentFlags().StringSlice("app.allowed-record-types", nil, "Comma-separated list of allowed DNS record types (e.g., A,CNAME)")
+	viper.BindPFlag("app.allowed_record_types", rootCmd.PersistentFlags().Lookup("app.allowed-record-types"))
+
+	rootCmd.PersistentFlags().String("app.docker-label-prefix", "", "Prefix used for Docker labels (e.g., 'coredns')")
+	viper.BindPFlag("app.docker_label_prefix", rootCmd.PersistentFlags().Lookup("app.docker-label-prefix"))
+
+	rootCmd.PersistentFlags().String("app.host-ip", "", "Host IP address to use in A records")
+	viper.BindPFlag("app.host_ip", rootCmd.PersistentFlags().Lookup("app.host-ip"))
+
+	rootCmd.PersistentFlags().String("app.hostname", "", "Logical hostname of this instance")
+	viper.BindPFlag("app.hostname", rootCmd.PersistentFlags().Lookup("app.hostname"))
+
+	rootCmd.PersistentFlags().Int("app.poll-interval", 0, "Polling interval (in seconds) for reconciliation")
+	viper.BindPFlag("app.poll_interval", rootCmd.PersistentFlags().Lookup("app.poll-interval"))
+
+	// EtcdConfig Flags
+	rootCmd.PersistentFlags().String("etcd.host", "", "etcd host to connect to")
+	viper.BindPFlag("etcd.host", rootCmd.PersistentFlags().Lookup("etcd.host"))
+
+	rootCmd.PersistentFlags().Int("etcd.port", 0, "etcd port")
+	viper.BindPFlag("etcd.port", rootCmd.PersistentFlags().Lookup("etcd.port"))
+
+	rootCmd.PersistentFlags().String("etcd.path-prefix", "", "etcd key path prefix (e.g., /skydns)")
+	viper.BindPFlag("etcd.path_prefix", rootCmd.PersistentFlags().Lookup("etcd.path-prefix"))
+
+	rootCmd.PersistentFlags().Float64("etcd.lock-ttl", 0, "TTL (in seconds) for etcd locks")
+	viper.BindPFlag("etcd.lock_ttl", rootCmd.PersistentFlags().Lookup("etcd.lock-ttl"))
+
+	rootCmd.PersistentFlags().Float64("etcd.lock-timeout", 0, "Timeout (in seconds) for acquiring etcd locks")
+	viper.BindPFlag("etcd.lock_timeout", rootCmd.PersistentFlags().Lookup("etcd.lock-timeout"))
+
+	rootCmd.PersistentFlags().Float64("etcd.lock-retry-interval", 0, "Interval (in seconds) to retry etcd lock acquisition")
+	viper.BindPFlag("etcd.lock_retry_interval", rootCmd.PersistentFlags().Lookup("etcd.lock-retry-interval"))
+
+	// LoggingConfig Flag
+	rootCmd.PersistentFlags().String("log.level", "", "Log level (e.g., TRACE, DEBUG, INFO, WARN, ERROR, FATAL)")
+	viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log.level"))
 }
 
 // Execute runs the root command.
