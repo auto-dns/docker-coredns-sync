@@ -74,8 +74,9 @@ func (se *SyncEngine) handleEvent(evt ContainerEvent) {
 			se.logger.Info().Msgf("Upserted state for container %s", evt.ID)
 		}
 	} else {
-		se.stateTracker.MarkRemoved(evt.ID)
-		se.logger.Info().Msgf("Marked container %s as removed", evt.ID)
+		if removed := se.stateTracker.MarkRemoved(evt.ID); removed {
+			se.logger.Info().Msgf("Marked container %s as removed", evt.ID)
+		}
 	}
 }
 
