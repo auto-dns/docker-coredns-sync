@@ -1,141 +1,119 @@
 # docker-coredns-sync
 
-docker-coredns-sync listens for Docker container events and automatically registers or deregisters A and CNAME records in etcd using the [SkyDNS/CoreDNS etcd plugin format](https://coredns.io/plugins/etcd/). This enables dynamic DNS resolution for containers via CoreDNS.
+`docker-coredns-sync` listens for Docker container events and automatically registers/deregisters A and CNAME records in etcd using the [SkyDNS/CoreDNS etcd plugin format](https://coredns.io/plugins/etcd/). This enables dynamic DNS resolution for containers via CoreDNS.
 
 ---
 
 ## Features
-* Supports **A** and **CNAME** records
-* Multiple domain support per container
-* Prevents CNAME cycles
-* Automatically removes stale records
-* Graceful shutdown support
-* Label-based configuration
+
+- Supports **A** and **CNAME** records
+- Multiple domain support per container
+- Prevents CNAME cycles
+- Automatically removes stale records
+- Graceful shutdown support
+- Flexible configuration via **flags**, **env vars**, and **config file**
+- Supports both **YAML** and **JSON** config formats
 
 ---
 
 ## Docker Label Configuration
 
-Add these labels to your Docker containers to register DNS records:
-
 ### Required
-* `coredns.enabled=true` — Enables DNS registration for this container.
+
+- `coredns.enabled=true` — Enables DNS registration for this container.
 
 ### A Record
 
-* `coredns.a.name=foo.example.com`
-* `coredns.a.value=192.168.200.1` -  Optional (defaults to HOST_IP)
+- `coredns.a.name=foo.example.com`
+- `coredns.a.value=192.168.200.1` *(optional, defaults to `host_ip`)*
 
 ### CNAME Record
 
-* `coredns.cname.name=bar.example.com`
-* `coredns.cname.value=foo.example.com`
+- `coredns.cname.name=bar.example.com`
+- `coredns.cname.value=foo.example.com`
 
-### Multiple Records
+### Aliased Records
 
-You can define multiple A or CNAME records by appending numeric indices:
+Supports multiple A/CNAME records via aliases:
 
-* `coredns.a.1.name=foo.example.com`
-* `coredns.a.1.value=192.168.200.2`
-* `coredns.cname.2.name=bar.example.com`
-* `coredns.cname.2.value=foo.example.com`
+```yaml
+coredns.a.proxy.name=proxy.example.com
+coredns.a.proxy.value=192.168.200.2
+
+coredns.cname.app.name=app.example.com
+coredns.cname.app.value=target.example.com
+```
 
 ### Optional
-* `coredns.a.name.force=true` — Forces registration even if the record already exists and is owned by this host - applies to the specific a record to which it's added.
-* `coredns.force=true` — Forces registration even if the record already exists and is owned by this host - applies to all records defined on the labels on the docker container.
+
+- `coredns.force=true` — Force registration for all records in the container
+- `coredns.a.name.force=true` — Force a specific A record
 
 ---
 
-## Environment Variables
+## Configuration Overview
 
-Set these to configure sync behavior:
+Configuration values can be provided via:
 
-| Variable | Description | Default |
-| --- | --- | --- |
-| `HOST_IP` | Default IP for A records | `127.0.0.1` |
-| `HOSTNAME` | Unique host identifier | *your-hostname* |
-| `ETCD_HOST` | etcd host | `localhost` |
-| `ETCD_PORT` | etcd port | `2379` |
-| `ETCD_PATH_PREFIX` | etcd base key path for DNS records | `/skydns` |
-| `DOCKER_LABEL_PREFIX` | Label namespace to use (e.g. `coredns`) | `coredns` |
-| `LOG_LEVEL` | Logging level (**DEBUG**, **INFO**, etc.) | **INFO** |
----
-
-## etcd Record Format
-
-Records are stored in etcd using SkyDNS naming format:
-```
-/skydns/<reversed.domain.name>/xN
-```
-
-### Example A Record
-
-Key:
-```
-com/example/foo/x1
-```
-
-Value:
-```json
-{
-  "record_type": "A",
-  "host": "192.168.200.1",
-  "owner": "mozart"
-}
-```
-
-### Example CNAME Record
-
-Key:
-```
-com/example/bar/x1
-```
-
-Value:
-```json
-{
-  "record_type": "CNAME",
-  "host": "foo.example.com",
-  "owner": "mozart"
-}
-```
-
-CNAME cycles are automatically detected and prevented.
+1. **Command-line flags** (highest precedence)
+2. **Environment variables**
+3. **Config file** (`config.yaml` or `config.json`)
+4. **Built-in defaults** (lowest precedence)
 
 ---
 
-## CoreDNS Setup
+## Configuration Reference
 
-Example CoreDNS configuration for dynamic resolution via etcd:
-
-```hcl
-.:5335 {
-    etcd example.com {
-        path /skydns
-        endpoint http://127.0.0.1:2379
-        fallthrough
-    }
-
-    forward . 1.1.1.1 1.0.0.1
-    cache 30
-    log
-}
-```
-
-You can use Pi-hole or your local system to point queries to this port.
+| Flag | Config Key | Env Var | Type | Default | Description |
+|------|------------|---------|------|---------|-------------|
+| `--app.allowed-record-types` | `app.allowed_record_types` | `DOCKER_COREDNS_SYNC_APP_ALLOWED_RECORD_TYPES` | `[]string` | `["A", "CNAME"]` | DNS record types to allow |
+| `--app.docker-label-prefix` | `app.docker_label_prefix` | `DOCKER_COREDNS_SYNC_APP_DOCKER_LABEL_PREFIX` | `string` | `"coredns"` | Docker label namespace |
+| `--app.host-ip` | `app.host_ip` | `DOCKER_COREDNS_SYNC_APP_HOST_IP` | `string` | `"127.0.0.1"` | IP to use for A records |
+| `--app.hostname` | `app.hostname` | `DOCKER_COREDNS_SYNC_APP_HOSTNAME` | `string` | `"your-hostname"` | Unique logical hostname for this node |
+| `--app.poll-interval` | `app.poll_interval` | `DOCKER_COREDNS_SYNC_APP_POLL_INTERVAL` | `int` | `5` | How often to reconcile the registry (in seconds) |
+| `--etcd.host` | `etcd.host` | `DOCKER_COREDNS_SYNC_ETCD_HOST` | `string` | `"localhost"` | etcd host |
+| `--etcd.port` | `etcd.port` | `DOCKER_COREDNS_SYNC_ETCD_PORT` | `int` | `2379` | etcd port |
+| `--etcd.path-prefix` | `etcd.path_prefix` | `DOCKER_COREDNS_SYNC_ETCD_PATH_PREFIX` | `string` | `"/skydns"` | etcd base path |
+| `--etcd.lock-ttl` | `etcd.lock_ttl` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TTL` | `float` | `5.0` | Lock lease time-to-live in seconds |
+| `--etcd.lock-timeout` | `etcd.lock_timeout` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TIMEOUT` | `float` | `2.0` | Lock acquisition timeout |
+| `--etcd.lock-retry-interval` | `etcd.lock_retry_interval` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_RETRY_INTERVAL` | `float` | `0.1` | Retry interval for lock acquisition |
+| `--log.level` | `log.level` | `DOCKER_COREDNS_SYNC_LOG_LEVEL` | `string` | `"INFO"` | Logging level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`) |
 
 ---
 
-## Running
+## Config File Locations
 
-Install dependencies and run:
+Config files are searched in the following paths by default (unless `--config` is passed):
 
-```bash
-pip install -r requirements.txt
-python3 -m main
+- `$HOME/.config/docker-coredns-sync/config.yaml`
+- `/etc/docker-coredns-sync/config.yaml`
+- `/config/config.yaml`
+- `./config.yaml`
+
+Currently, only the `.yaml` format is explicitly supported unless overriding with a custom config file via the `--config` CLI arg, in which case, the `viper` library will do it's best to infer the file type from its extension.
+
+---
+
+## Example Config File (`config.yaml`)
+
+```yaml
+app:
+  allowed_record_types:
+    - A
+    - CNAME
+  docker_label_prefix: coredns
+  host_ip: 192.168.1.100
+  hostname: mozart
+  poll_interval: 5
+
+log:
+  level: INFO
+
+etcd:
+  host: etcd
+  port: 2379
+  path_prefix: /skydns
+  lock_ttl: 5.0
+  lock_timeout: 2.0
+  lock_retry_interval: 0.1
 ```
-
-The sync script:
-* Performs an initial sync on startup
-* Watches live container events (`start`, `die`, `destroy`)
-* Automatically adds/removes records in etcd
