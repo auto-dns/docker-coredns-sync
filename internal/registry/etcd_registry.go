@@ -10,10 +10,10 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/StevenC4/docker-coredns-sync/internal/config"
-	"github.com/StevenC4/docker-coredns-sync/internal/dns"
-	"github.com/StevenC4/docker-coredns-sync/internal/intent"
-	"github.com/StevenC4/docker-coredns-sync/internal/util"
+	"github.com/auto-dns/docker-coredns-sync/internal/config"
+	"github.com/auto-dns/docker-coredns-sync/internal/dns"
+	"github.com/auto-dns/docker-coredns-sync/internal/intent"
+	"github.com/auto-dns/docker-coredns-sync/internal/util"
 	"github.com/rs/zerolog"
 )
 
