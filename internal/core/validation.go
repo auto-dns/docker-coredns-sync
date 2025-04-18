@@ -3,8 +3,8 @@ package core
 import (
 	"fmt"
 
-	"github.com/the original repository/internal/dns"
-	"github.com/the original repository/internal/intent"
+	"github.com/auto-dns/docker-coredns-sync/internal/dns"
+	"github.com/auto-dns/docker-coredns-sync/internal/intent"
 	"github.com/rs/zerolog"
 )
 

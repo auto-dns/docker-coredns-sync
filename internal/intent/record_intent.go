@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/the original repository/internal/dns"
+	"github.com/auto-dns/docker-coredns-sync/internal/dns"
 )
 
 type RecordIntent struct {
