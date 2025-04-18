@@ -117,3 +117,11 @@ etcd:
   lock_timeout: 2.0
   lock_retry_interval: 0.1
 ```
+
+## License
+
+This project is licensed under a [custom MIT-NC License](./LICENSE), which permits non-commercial use only.
+
+You are free to use, modify, and distribute this code for personal, educational, or internal business purposes. **However, commercial use — including bundling with a paid product or service — is strictly prohibited without prior written permission.**
+
+If you are interested in commercial licensing, please contact: [auto-dns@sl.carroll.live]
