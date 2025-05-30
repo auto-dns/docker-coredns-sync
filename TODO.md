@@ -13,7 +13,7 @@
   * I want to implement a way to correct these records automatically without going through a cumbersome process.
 
 ## Bugs
-* 
+* A records with no value work for simple labels (coredns.a.name) but not for ones with identifiers (coredns.a.1.name, coredns.a.test.name, coredns.a.proxy.name)
 
 ## Updates
 * Find and fix code smells
