@@ -147,9 +147,18 @@ func GetContainerRecordIntents(event ContainerEvent, cfg *config.AppConfig, logg
 		for alias, kv := range aliases {
 			name, nameOk := kv["name"]
 			value, valueOk := kv["value"]
-			if !nameOk || !valueOk {
-				logger.Warn().Msgf("Skipping alias %s for type %s due to missing name or value", alias, recordType)
+			if !nameOk {
+				logger.Warn().Msgf("Skipping - %s.%s.%s.value label found with no matching name", prefix, recordType, alias)
 				continue
+			}
+			if !valueOk {
+				if recordType == "A" {
+					value = cfg.HostIP
+					logger.Warn().Msgf("%s.A.%s.name label found with no matching %s.A.%s.value. Using host IP %s", prefix, alias, prefix, alias, value)
+				} else {
+					logger.Warn().Msgf("Skipping - %s.%s.%s.name label found with no matching value", prefix, recordType, alias)
+					continue
+				}
 			}
 
 			var rec dns.Record
