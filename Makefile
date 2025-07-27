@@ -42,7 +42,7 @@ dev-init:
 	@touch config.yaml
 	@mkdir -p .devcontainer
 	@mkdir -p .devcontainer/etcd
-	@touch .devcontainer/.env
+	@touch .devcontainer/config.yaml
 
 test:
 	pytest tests
