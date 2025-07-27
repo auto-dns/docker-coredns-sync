@@ -32,7 +32,7 @@ func getNewWatcher(logger zerolog.Logger) (core.DockerWatcher, error) {
 
 func getNewRegistry(cfg *config.Config, logger zerolog.Logger) (registry.Registry, error) {
 	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{fmt.Sprintf("http://%s:%d", cfg.Etcd.Host, cfg.Etcd.Port)},
+		Endpoints:   cfg.Etcd.Endpoints,
 		DialTimeout: 2 * time.Second,
 	})
 	if err != nil {

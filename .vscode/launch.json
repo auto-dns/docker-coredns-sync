@@ -7,8 +7,9 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/cmd/docker-coredns-sync",
-            "envFile": "${workspaceFolder}/.devcontainer/.env",
-            "args": [],
+            "args": [
+                "--config", "${workspaceFolder}/.devcontainer/config.yaml"
+            ],
             "cwd": "${workspaceFolder}"
         },
         {
@@ -17,8 +18,10 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/cmd/docker-coredns-sync",
-            "envFile": "${workspaceFolder}/.devcontainer/.env",
-            "args": ["--log-level", "DEBUG"],
+            "args": [
+                "--log-level", "DEBUG",
+                "--config", "${workspaceFolder}/.devcontainer/config.yaml"
+            ],
             "cwd": "${workspaceFolder}"
         },
         {
@@ -27,7 +30,6 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/cmd/docker-coredns-sync",
-            "envFile": "${workspaceFolder}/.devcontainer/.env",
             "args": ["subcommandX", "--option", "value"],
         }
     ]

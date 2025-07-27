@@ -110,8 +110,8 @@ log:
   level: INFO
 
 etcd:
-  host: etcd
-  port: 2379
+  endpoints:
+    - http://etcd:2379
   path_prefix: /skydns
   lock_ttl: 5.0
   lock_timeout: 2.0

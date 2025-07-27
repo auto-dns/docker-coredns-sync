@@ -88,11 +88,8 @@ func init() {
 	viper.BindPFlag("app.poll_interval", rootCmd.PersistentFlags().Lookup("app.poll-interval"))
 
 	// EtcdConfig Flags
-	rootCmd.PersistentFlags().String("etcd.host", "", "etcd host to connect to")
-	viper.BindPFlag("etcd.host", rootCmd.PersistentFlags().Lookup("etcd.host"))
-
-	rootCmd.PersistentFlags().Int("etcd.port", 0, "etcd port")
-	viper.BindPFlag("etcd.port", rootCmd.PersistentFlags().Lookup("etcd.port"))
+	rootCmd.PersistentFlags().StringArray("etcd-endpoint", []string{"http://localhost:2379"}, "Comma-separated list of etcd endpoints (can specify multiple times)")
+	viper.BindPFlag("etcd.endpoints", rootCmd.PersistentFlags().Lookup("etcd-endpoint"))
 
 	rootCmd.PersistentFlags().String("etcd.path-prefix", "", "etcd key path prefix (e.g., /skydns)")
 	viper.BindPFlag("etcd.path_prefix", rootCmd.PersistentFlags().Lookup("etcd.path-prefix"))
