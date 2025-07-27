@@ -26,12 +26,11 @@ type LoggingConfig struct {
 
 // EtcdConfig holds etcd-related configuration.
 type EtcdConfig struct {
-	Host              string  `mapstructure:"host"`
-	Port              int     `mapstructure:"port"`
-	PathPrefix        string  `mapstructure:"path_prefix"`
-	LockTTL           float64 `mapstructure:"lock_ttl"`
-	LockTimeout       float64 `mapstructure:"lock_timeout"`
-	LockRetryInterval float64 `mapstructure:"lock_retry_interval"`
+	Endpoints         []string `mapstructure:"endpoints"`
+	PathPrefix        string   `mapstructure:"path_prefix"`
+	LockTTL           float64  `mapstructure:"lock_ttl"`
+	LockTimeout       float64  `mapstructure:"lock_timeout"`
+	LockRetryInterval float64  `mapstructure:"lock_retry_interval"`
 }
 
 // Config is the top-level configuration struct.
@@ -90,8 +89,7 @@ func initConfig() error {
 	viper.SetDefault("app.host_ip", "127.0.0.1")
 	viper.SetDefault("app.hostname", "your-hostname")
 	viper.SetDefault("app.poll_interval", 5)
-	viper.SetDefault("etcd.host", "localhost")
-	viper.SetDefault("etcd.port", 2379)
+	viper.SetDefault("etcd.endpoints", []string{"http://localhost:2379"})
 	viper.SetDefault("etcd.path_prefix", "/skydns")
 	viper.SetDefault("etcd.lock_ttl", 5.0)
 	viper.SetDefault("etcd.lock_timeout", 2.0)
@@ -141,11 +139,13 @@ func (c *Config) validate() error {
 	if c.App.PollInterval <= 0 {
 		return fmt.Errorf("app.poll_interval must be greater than 0")
 	}
-	if c.Etcd.Host == "" {
-		return fmt.Errorf("etcd.host cannot be empty")
+	if len(c.Etcd.Endpoints) == 0 {
+		return fmt.Errorf("etcd.endpoints must have at least one endpoint")
 	}
-	if c.Etcd.Port <= 0 || c.Etcd.Port > 65535 {
-		return fmt.Errorf("etcd.port must be a valid TCP port")
+	for _, e := range c.Etcd.Endpoints {
+		if !strings.HasPrefix(e, "http://") && !strings.HasPrefix(e, "https://") {
+			return fmt.Errorf("invalid endpoint: %s", e)
+		}
 	}
 	if c.Etcd.PathPrefix == "" {
 		return fmt.Errorf("etcd.path_prefix cannot be empty")
