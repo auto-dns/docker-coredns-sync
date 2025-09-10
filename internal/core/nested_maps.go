@@ -6,37 +6,37 @@ import (
 )
 
 // Define struct types
-type NestedRecordMap struct {
-	*util.DefaultMap[string, *TypeMap]
+type nestedRecordMap struct {
+	*util.DefaultMap[string, *typeMap]
 }
 
-type TypeMap struct {
-	*util.DefaultMap[string, *RecordMap]
+type typeMap struct {
+	*util.DefaultMap[string, *recordMap]
 }
 
-type RecordMap struct {
+type recordMap struct {
 	*util.DefaultMap[string, *intent.RecordIntent]
 }
 
 // Create constructor functions
-func NewNestedRecordMap() *NestedRecordMap {
-	return &NestedRecordMap{
-		DefaultMap: util.NewDefaultMap[string](func() *TypeMap {
-			return NewTypeMap()
+func newNestedRecordMap() *nestedRecordMap {
+	return &nestedRecordMap{
+		DefaultMap: util.NewDefaultMap[string](func() *typeMap {
+			return newTypeMap()
 		}),
 	}
 }
 
-func NewTypeMap() *TypeMap {
-	return &TypeMap{
-		DefaultMap: util.NewDefaultMap[string](func() *RecordMap {
-			return NewRecordMap()
+func newTypeMap() *typeMap {
+	return &typeMap{
+		DefaultMap: util.NewDefaultMap[string](func() *recordMap {
+			return newRecordMap()
 		}),
 	}
 }
 
-func NewRecordMap() *RecordMap {
-	return &RecordMap{
+func newRecordMap() *recordMap {
+	return &recordMap{
 		DefaultMap: util.NewDefaultMap[string](func() *intent.RecordIntent {
 			return nil
 		}),
@@ -44,7 +44,7 @@ func NewRecordMap() *RecordMap {
 }
 
 // By nothing
-func (m NestedRecordMap) GetAllValues() []*intent.RecordIntent {
+func (m nestedRecordMap) GetAllValues() []*intent.RecordIntent {
 	values := make([]*intent.RecordIntent, 0)
 	for _, typeMap := range m.Values() {
 		for _, recordMap := range typeMap.Values() {
@@ -56,7 +56,7 @@ func (m NestedRecordMap) GetAllValues() []*intent.RecordIntent {
 	return values
 }
 
-func (m NestedRecordMap) GetAllNames() []string {
+func (m nestedRecordMap) GetAllNames() []string {
 	names := make([]string, 0)
 	for _, key := range m.Keys() {
 		names = append(names, key)
@@ -67,7 +67,7 @@ func (m NestedRecordMap) GetAllNames() []string {
 // By name
 
 // By name and type
-func (m NestedRecordMap) PeekNameTypeRecords(name, recordType string) ([]*intent.RecordIntent, bool) {
+func (m nestedRecordMap) PeekNameTypeRecords(name, recordType string) ([]*intent.RecordIntent, bool) {
 	if typeMap, exists := m.Peek(name); exists {
 		if recordMap, exists := typeMap.Peek(recordType); exists {
 			return recordMap.Values(), true
@@ -78,18 +78,18 @@ func (m NestedRecordMap) PeekNameTypeRecords(name, recordType string) ([]*intent
 }
 
 // DeleteDomainType removes all records of a specific type for a name
-func (m NestedRecordMap) DeleteNameType(name, recordType string) {
+func (m nestedRecordMap) DeleteNameType(name, recordType string) {
 	if domainMap, exists := m.Peek(name); exists {
 		domainMap.Delete(recordType)
 	}
 }
 
 // By name, type, and value
-func (m *NestedRecordMap) GetNameTypeRecord(name, recordType, value string) *intent.RecordIntent {
+func (m *nestedRecordMap) GetNameTypeRecord(name, recordType, value string) *intent.RecordIntent {
 	return m.Get(name).Get(recordType).Get(value)
 }
 
-func (m *NestedRecordMap) PeekNameTypeRecord(name, recordType, value string) (*intent.RecordIntent, bool) {
+func (m *nestedRecordMap) PeekNameTypeRecord(name, recordType, value string) (*intent.RecordIntent, bool) {
 	typeMap, exists := m.Peek(name)
 	if !exists {
 		return nil, false
