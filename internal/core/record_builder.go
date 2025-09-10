@@ -53,16 +53,16 @@ func GetContainerRecordIntents(event ContainerEvent, cfg *config.AppConfig, logg
 		}
 
 		recordType := strings.ToUpper(parts[1])
-		// Check if recordType is allowed.
-		allowed := false
-		for _, rt := range cfg.AllowedRecordTypes {
-			if recordType == rt {
-				allowed = true
-				break
-			}
-		}
-		// Skip unknown types except non-record labels (like "enabled" or "force").
-		if !allowed && recordType != "enabled" && recordType != "force" {
+		switch {
+		case recordType == "A" && !cfg.RecordTypes.A.Enabled,
+			recordType == "AAAA" && !cfg.RecordTypes.AAAA.Enabled,
+			recordType == "CNAME" && !cfg.RecordTypes.CNAME.Enabled:
+			logger.Warn().Msgf("Skipping disabled label '%s' for disabled record type '%s'", label, recordType)
+			continue
+		case recordType == "enabled",
+			recordType == "force":
+			// Known record types
+		default:
 			logger.Warn().Msgf("Skipping unsupported record type '%s' for label '%s'", recordType, label)
 			continue
 		}
