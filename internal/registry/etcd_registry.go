@@ -75,80 +75,6 @@ func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (str
 	return fmt.Sprintf("%s/x%d", baseKey, index), nil
 }
 
-// getEtcdValue converts a RecordIntent to its JSON representation for storing in etcd.
-func (er *EtcdRegistry) getEtcdValue(ri *domain.RecordIntent) (string, error) {
-	data := map[string]interface{}{
-		"host":                 ri.Record.Value,
-		"record_type":          ri.Record.Type,
-		"owner_hostname":       ri.Hostname,
-		"owner_container_id":   ri.ContainerID,
-		"owner_container_name": ri.ContainerName,
-		"created":              ri.Created.Format(time.RFC3339),
-		"force":                ri.Force,
-	}
-	b, err := json.Marshal(data)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-// parseEtcdValue converts an etcd key/value pair into a RecordIntent.
-func (er *EtcdRegistry) parseEtcdValue(key, value string) (*domain.RecordIntent, error) {
-	// Remove the configured prefix.
-	path := strings.TrimPrefix(key, er.cfg.PathPrefix)
-	path = strings.TrimPrefix(path, "/")
-	parts := strings.Split(path, "/")
-	// If the last part is an index (starts with "x"), remove it.
-	if len(parts) > 0 {
-		last := parts[len(parts)-1]
-		if len(last) > 0 && last[0] == 'x' {
-			parts = parts[:len(parts)-1]
-		}
-	}
-	// Reconstruct FQDN by reversing parts.
-	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
-		parts[i], parts[j] = parts[j], parts[i]
-	}
-	recordName := strings.Join(parts, ".")
-	var data map[string]interface{}
-	if err := json.Unmarshal([]byte(value), &data); err != nil {
-		return nil, err
-	}
-	recordType, ok := data["record_type"].(string)
-	recordType = strings.ToUpper(recordType)
-	if !ok || recordType == "" {
-		return nil, fmt.Errorf("missing record_type in etcd record: %v", data)
-	}
-	host, ok := data["host"].(string)
-	if !ok || host == "" {
-		return nil, fmt.Errorf("missing host in etcd record: %v", data)
-	}
-	ownerHostname, _ := data["owner_hostname"].(string)
-	ownerContainerID, _ := data["owner_container_id"].(string)
-	ownerContainerName, _ := data["owner_container_name"].(string)
-	createdStr, _ := data["created"].(string)
-	created, err := time.Parse(time.RFC3339, createdStr)
-	if err != nil {
-		return nil, err
-	}
-	force, _ := data["force"].(bool)
-
-	rec, err := domain.NewFromString(recordType, recordName, value)
-	if err != nil {
-		return nil, err
-	}
-
-	return &domain.RecordIntent{
-		ContainerID:   ownerContainerID,
-		ContainerName: ownerContainerName,
-		Created:       created,
-		Hostname:      ownerHostname,
-		Force:         force,
-		Record:        rec,
-	}, nil
-}
-
 // Register stores the record intent in etcd.
 func (er *EtcdRegistry) Register(ctx context.Context, ri *domain.RecordIntent) error {
 	fqdn := ri.Record.Name
@@ -156,7 +82,7 @@ func (er *EtcdRegistry) Register(ctx context.Context, ri *domain.RecordIntent) e
 	if err != nil {
 		return err
 	}
-	value, err := er.getEtcdValue(ri)
+	value, err := marshalEtcdValue(ri)
 	if err != nil {
 		return err
 	}
@@ -180,16 +106,16 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *domain.RecordIntent) err
 	}
 	for _, kv := range resp.Kvs {
 		keyStr := string(kv.Key)
-		var data map[string]interface{}
-		if err := json.Unmarshal(kv.Value, &data); err != nil {
+		var wire etcdRecord
+		if err := json.Unmarshal(kv.Value, &wire); err != nil {
 			er.logger.Warn().Err(err).Msgf("Could not parse key %s", keyStr)
 			continue
 		}
 		// Match based on record fields.
-		if data["host"] == ri.Record.Value &&
-			data["record_type"] == ri.Record.Type &&
-			data["owner_hostname"] == ri.Hostname &&
-			data["owner_container_name"] == ri.ContainerName {
+		if wire.Host == ri.Record.Value &&
+			wire.RecordType == ri.Record.Type &&
+			wire.OwnerHostname == ri.Hostname &&
+			wire.OwnerContainerName == ri.ContainerName {
 			_, err := er.client.Delete(ctx, keyStr)
 			if err != nil {
 				er.logger.Warn().Err(err).Msgf("Failed to delete key %s", keyStr)
@@ -212,7 +138,7 @@ func (er *EtcdRegistry) List(ctx context.Context) ([]*domain.RecordIntent, error
 	var intents []*domain.RecordIntent
 	for _, kv := range resp.Kvs {
 		keyStr := string(kv.Key)
-		ri, err := er.parseEtcdValue(keyStr, string(kv.Value))
+		ri, err := unmarshalEtcdValue(keyStr, string(kv.Value), er.cfg.PathPrefix)
 		if err != nil {
 			er.logger.Error().Err(err).Msgf("Failed to parse key: %s", keyStr)
 			continue

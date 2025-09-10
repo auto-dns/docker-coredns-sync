@@ -6,7 +6,7 @@ import (
 )
 
 type RecordIntent struct {
-	ContainerID   string
+	ContainerId   string
 	ContainerName string
 	Created       time.Time
 	Hostname      string
@@ -15,11 +15,11 @@ type RecordIntent struct {
 }
 
 func (ri RecordIntent) Render() string {
-	return fmt.Sprintf("%s (container_id=%s, container_name=%s, hostname=%s, created=%s, force=%t)", ri.Record.Render(), ri.ContainerID, ri.ContainerName, ri.Hostname, ri.Created.Format("2006-01-02 15:04:05"), ri.Force)
+	return fmt.Sprintf("%s (container_id=%s, container_name=%s, hostname=%s, created=%s, force=%t)", ri.Record.Render(), ri.ContainerId, ri.ContainerName, ri.Hostname, ri.Created.Format("2006-01-02 15:04:05"), ri.Force)
 }
 
 func (ri RecordIntent) Equal(other RecordIntent) bool {
-	return ri.ContainerID == other.ContainerID &&
+	return ri.ContainerId == other.ContainerId &&
 		ri.ContainerName == other.ContainerName &&
 		ri.Hostname == other.Hostname &&
 		ri.Force == other.Force &&
@@ -27,5 +27,5 @@ func (ri RecordIntent) Equal(other RecordIntent) bool {
 }
 
 func (ri RecordIntent) Key() string {
-	return fmt.Sprintf("%s|%s|%s|%t|%s", ri.ContainerID, ri.ContainerName, ri.Hostname, ri.Force, ri.Record.Key())
+	return fmt.Sprintf("%s|%s|%s|%t|%s", ri.ContainerId, ri.ContainerName, ri.Hostname, ri.Force, ri.Record.Key())
 }
