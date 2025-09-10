@@ -77,7 +77,6 @@ func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (str
 
 // getEtcdValue converts a RecordIntent to its JSON representation for storing in etcd.
 func (er *EtcdRegistry) getEtcdValue(ri *domain.RecordIntent) (string, error) {
-	// We assume that both ARecord and CNAMERecord implement dns.Record.
 	data := map[string]interface{}{
 		"host":                 ri.Record.Value,
 		"record_type":          ri.Record.Type,
