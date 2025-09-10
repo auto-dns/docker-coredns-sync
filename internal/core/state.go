@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/auto-dns/docker-coredns-sync/internal/intent"
+	"github.com/auto-dns/docker-coredns-sync/internal/domain"
 )
 
 // ContainerState holds state derived from container events.
@@ -13,7 +13,7 @@ type ContainerState struct {
 	ContainerName string
 	Created       time.Time
 	LastUpdated   time.Time
-	RecordIntents []*intent.RecordIntent
+	RecordIntents []*domain.RecordIntent
 	Status        string // "running", "removed"
 }
 
@@ -31,7 +31,7 @@ func NewStateTracker() *StateTracker {
 }
 
 // Upsert inserts or updates the state for a container.
-func (s *StateTracker) Upsert(containerID, containerName string, created time.Time, intents []*intent.RecordIntent, status string) {
+func (s *StateTracker) Upsert(containerID, containerName string, created time.Time, intents []*domain.RecordIntent, status string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.containers[containerID] = &ContainerState{
@@ -57,10 +57,10 @@ func (s *StateTracker) MarkRemoved(containerID string) bool {
 }
 
 // GetAllDesiredRecordIntents returns all record intents from running containers.
-func (s *StateTracker) GetAllDesiredRecordIntents() []*intent.RecordIntent {
+func (s *StateTracker) GetAllDesiredRecordIntents() []*domain.RecordIntent {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var intents []*intent.RecordIntent
+	var intents []*domain.RecordIntent
 	for _, cs := range s.containers {
 		if cs.Status == "running" {
 			intents = append(intents, cs.RecordIntents...)

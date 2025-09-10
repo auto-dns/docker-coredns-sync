@@ -9,8 +9,7 @@ import (
 	"time"
 
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
-	"github.com/auto-dns/docker-coredns-sync/internal/dns"
-	"github.com/auto-dns/docker-coredns-sync/internal/intent"
+	"github.com/auto-dns/docker-coredns-sync/internal/domain"
 	"github.com/auto-dns/docker-coredns-sync/internal/util"
 	"github.com/rs/zerolog"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -77,11 +76,11 @@ func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (str
 }
 
 // getEtcdValue converts a RecordIntent to its JSON representation for storing in etcd.
-func (er *EtcdRegistry) getEtcdValue(ri *intent.RecordIntent) (string, error) {
+func (er *EtcdRegistry) getEtcdValue(ri *domain.RecordIntent) (string, error) {
 	// We assume that both ARecord and CNAMERecord implement dns.Record.
 	data := map[string]interface{}{
-		"host":                 ri.Record.GetValue(),
-		"record_type":          ri.Record.GetType(),
+		"host":                 ri.Record.Value,
+		"record_type":          ri.Record.Type,
 		"owner_hostname":       ri.Hostname,
 		"owner_container_id":   ri.ContainerID,
 		"owner_container_name": ri.ContainerName,
@@ -96,7 +95,7 @@ func (er *EtcdRegistry) getEtcdValue(ri *intent.RecordIntent) (string, error) {
 }
 
 // parseEtcdValue converts an etcd key/value pair into a RecordIntent.
-func (er *EtcdRegistry) parseEtcdValue(key, value string) (*intent.RecordIntent, error) {
+func (er *EtcdRegistry) parseEtcdValue(key, value string) (*domain.RecordIntent, error) {
 	// Remove the configured prefix.
 	path := strings.TrimPrefix(key, er.cfg.PathPrefix)
 	path = strings.TrimPrefix(path, "/")
@@ -112,13 +111,14 @@ func (er *EtcdRegistry) parseEtcdValue(key, value string) (*intent.RecordIntent,
 	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
 		parts[i], parts[j] = parts[j], parts[i]
 	}
-	fqdn := strings.Join(parts, ".")
+	recordName := strings.Join(parts, ".")
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(value), &data); err != nil {
 		return nil, err
 	}
-	recType, ok := data["record_type"].(string)
-	if !ok || recType == "" {
+	recordType, ok := data["record_type"].(string)
+	recordType = strings.ToUpper(recordType)
+	if !ok || recordType == "" {
 		return nil, fmt.Errorf("missing record_type in etcd record: %v", data)
 	}
 	host, ok := data["host"].(string)
@@ -135,41 +135,24 @@ func (er *EtcdRegistry) parseEtcdValue(key, value string) (*intent.RecordIntent,
 	}
 	force, _ := data["force"].(bool)
 
-	switch recType {
-	case "A", "a":
-		aRec, err := dns.NewARecord(fqdn, host)
-		if err != nil {
-			return nil, err
-		}
-		return &intent.RecordIntent{
-			ContainerID:   ownerContainerID,
-			ContainerName: ownerContainerName,
-			Created:       created,
-			Hostname:      ownerHostname,
-			Force:         force,
-			Record:        aRec,
-		}, nil
-	case "CNAME", "cname":
-		cnameRec, err := dns.NewCNAMERecord(fqdn, host)
-		if err != nil {
-			return nil, err
-		}
-		return &intent.RecordIntent{
-			ContainerID:   ownerContainerID,
-			ContainerName: ownerContainerName,
-			Created:       created,
-			Hostname:      ownerHostname,
-			Force:         force,
-			Record:        cnameRec,
-		}, nil
-	default:
-		return nil, fmt.Errorf("unknown record type: %s", recType)
+	rec, err := domain.NewFromString(recordType, recordName, value)
+	if err != nil {
+		return nil, err
 	}
+
+	return &domain.RecordIntent{
+		ContainerID:   ownerContainerID,
+		ContainerName: ownerContainerName,
+		Created:       created,
+		Hostname:      ownerHostname,
+		Force:         force,
+		Record:        rec,
+	}, nil
 }
 
 // Register stores the record intent in etcd.
-func (er *EtcdRegistry) Register(ctx context.Context, ri *intent.RecordIntent) error {
-	fqdn := ri.Record.GetName()
+func (er *EtcdRegistry) Register(ctx context.Context, ri *domain.RecordIntent) error {
+	fqdn := ri.Record.Name
 	key, err := er.getNextIndexedKey(ctx, fqdn)
 	if err != nil {
 		return err
@@ -182,9 +165,9 @@ func (er *EtcdRegistry) Register(ctx context.Context, ri *intent.RecordIntent) e
 	return err
 }
 
-// Remove finds and deletes the etcd key that matches the record intent.
-func (er *EtcdRegistry) Remove(ctx context.Context, ri *intent.RecordIntent) error {
-	fqdn := ri.Record.GetName()
+// Remove finds and deletes the etcd key that matches the record domain.
+func (er *EtcdRegistry) Remove(ctx context.Context, ri *domain.RecordIntent) error {
+	fqdn := ri.Record.Name
 	trimmed := strings.Trim(fqdn, ".")
 	parts := strings.Split(trimmed, ".")
 	// Reverse parts.
@@ -204,8 +187,8 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *intent.RecordIntent) err
 			continue
 		}
 		// Match based on record fields.
-		if data["host"] == ri.Record.GetValue() &&
-			data["record_type"] == ri.Record.GetType() &&
+		if data["host"] == ri.Record.Value &&
+			data["record_type"] == ri.Record.Type &&
 			data["owner_hostname"] == ri.Hostname &&
 			data["owner_container_name"] == ri.ContainerName {
 			_, err := er.client.Delete(ctx, keyStr)
@@ -221,13 +204,13 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *intent.RecordIntent) err
 }
 
 // List retrieves all record intents stored in etcd under the configured prefix.
-func (er *EtcdRegistry) List(ctx context.Context) ([]*intent.RecordIntent, error) {
+func (er *EtcdRegistry) List(ctx context.Context) ([]*domain.RecordIntent, error) {
 	prefix := er.cfg.PathPrefix
 	resp, err := er.client.Get(ctx, prefix, clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
-	var intents []*intent.RecordIntent
+	var intents []*domain.RecordIntent
 	for _, kv := range resp.Kvs {
 		keyStr := string(kv.Key)
 		ri, err := er.parseEtcdValue(keyStr, string(kv.Value))

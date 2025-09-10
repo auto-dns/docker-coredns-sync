@@ -1,10 +1,8 @@
-package intent
+package domain
 
 import (
 	"fmt"
 	"time"
-
-	"github.com/auto-dns/docker-coredns-sync/internal/dns"
 )
 
 type RecordIntent struct {
@@ -13,7 +11,7 @@ type RecordIntent struct {
 	Created       time.Time
 	Hostname      string
 	Force         bool
-	Record        dns.Record
+	Record        Record
 }
 
 func (ri RecordIntent) Render() string {
