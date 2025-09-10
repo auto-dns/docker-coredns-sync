@@ -87,7 +87,7 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfi
 	}
 
 	recordIntents := []*domain.RecordIntent{}
-	containerID := event.Container.Id
+	containerId := event.Container.Id
 	containerName := event.Container.Name
 	containerCreated := event.Container.Created
 	hostname := cfg.Hostname
@@ -119,7 +119,7 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfi
 		force := getForce(labels, containerForceLabel, fmt.Sprintf("%s.%s.force", prefix, strings.ToLower(recordType)))
 
 		intent := &domain.RecordIntent{
-			ContainerID:   containerID,
+			ContainerId:   containerId,
 			ContainerName: containerName,
 			Created:       containerCreated,
 			Force:         force,
@@ -156,7 +156,7 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfi
 			force := getForce(labels, containerForceLabel, fmt.Sprintf("%s.%s.%s.force", prefix, strings.ToLower(recordType), alias))
 
 			intent := &domain.RecordIntent{
-				ContainerID:   containerID,
+				ContainerId:   containerId,
 				ContainerName: containerName,
 				Created:       containerCreated,
 				Force:         force,
