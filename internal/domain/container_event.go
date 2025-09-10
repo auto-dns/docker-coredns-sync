@@ -8,7 +8,7 @@ const (
 	EventTypeContainerDied             = "die"
 	EventTypeContainerStarted          = "start"
 	EventTypeContainerStopped          = "stop"
-	EventTypeInitialContainerDetection = "inital_detection"
+	EventTypeInitialContainerDetection = "initial_detection"
 )
 
 func (et EventType) IsValid() bool {
