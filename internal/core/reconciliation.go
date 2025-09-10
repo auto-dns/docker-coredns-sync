@@ -100,7 +100,7 @@ func shouldReplaceAllExisting(new *intent.RecordIntent, existing []*intent.Recor
 func FilterRecordIntents(recordIntents []*intent.RecordIntent, logger zerolog.Logger) []*intent.RecordIntent {
 	logger.Debug().Msg("Reconciling desired records against each other")
 
-	desiredByNameType := NewNestedRecordMap()
+	desiredByNameType := newNestedRecordMap()
 	for _, ri := range recordIntents {
 		record := ri.Record
 		name := record.GetName()
@@ -128,7 +128,7 @@ func FilterRecordIntents(recordIntents []*intent.RecordIntent, logger zerolog.Lo
 		}
 	}
 
-	desiredByNameTypeDeduplicated := NewNestedRecordMap()
+	desiredByNameTypeDeduplicated := newNestedRecordMap()
 	for _, name := range desiredByNameType.GetAllNames() {
 		aRecords, aRecordsExist := desiredByNameType.PeekNameTypeRecords(name, "A")
 		cnameRecords, cnameRecordsExist := desiredByNameType.PeekNameTypeRecords(name, "CNAME")
@@ -162,7 +162,7 @@ func ReconcileAndValidate(desired, actual []*intent.RecordIntent, cfg *config.Ap
 	toAddMap := map[string]*intent.RecordIntent{}
 	toRemoveMap := map[string]*intent.RecordIntent{}
 
-	actualByNameType := NewNestedRecordMap()
+	actualByNameType := newNestedRecordMap()
 	desiredSet := make(map[string]struct{}, len(desired))
 	for _, ri := range desired {
 		desiredSet[ri.Key()] = struct{}{}

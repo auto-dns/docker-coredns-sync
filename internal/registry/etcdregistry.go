@@ -8,24 +8,13 @@ import (
 	"strings"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
 	"github.com/auto-dns/docker-coredns-sync/internal/dns"
 	"github.com/auto-dns/docker-coredns-sync/internal/intent"
 	"github.com/auto-dns/docker-coredns-sync/internal/util"
 	"github.com/rs/zerolog"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
-
-type etcdClient interface {
-	Get(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error)
-	Put(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error)
-	Delete(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error)
-	Grant(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error)
-	Txn(ctx context.Context) clientv3.Txn
-	Revoke(ctx context.Context, id clientv3.LeaseID) (*clientv3.LeaseRevokeResponse, error)
-	Close() error
-}
 
 type EtcdRegistry struct {
 	client   etcdClient

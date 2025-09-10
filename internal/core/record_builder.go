@@ -6,6 +6,7 @@ import (
 
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
 	"github.com/auto-dns/docker-coredns-sync/internal/dns"
+	"github.com/auto-dns/docker-coredns-sync/internal/domain"
 	"github.com/auto-dns/docker-coredns-sync/internal/intent"
 	"github.com/rs/zerolog"
 )
@@ -22,10 +23,10 @@ func getForce(labels map[string]string, containerForceLabel, recordForceLabel st
 }
 
 // GetContainerRecordIntents parses the container event's labels and returns record intents.
-func GetContainerRecordIntents(event ContainerEvent, cfg *config.AppConfig, logger zerolog.Logger) ([]*intent.RecordIntent, error) {
+func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfig, logger zerolog.Logger) ([]*intent.RecordIntent, error) {
 	var intents []*intent.RecordIntent
 
-	labels := event.Labels
+	labels := event.Container.Labels
 	prefix := cfg.DockerLabelPrefix
 
 	// If the feature is disabled in labels, return empty.
@@ -88,9 +89,9 @@ func GetContainerRecordIntents(event ContainerEvent, cfg *config.AppConfig, logg
 	}
 
 	recordIntents := []*intent.RecordIntent{}
-	containerID := event.ID
-	containerName := event.Name
-	containerCreated := event.Created
+	containerID := event.Container.Id
+	containerName := event.Container.Name
+	containerCreated := event.Container.Created
 	hostname := cfg.Hostname
 	containerForceLabel := prefix + ".force"
 

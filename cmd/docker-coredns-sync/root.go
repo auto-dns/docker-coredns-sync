@@ -44,10 +44,15 @@ var rootCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to create app: %w", err)
 		}
+		defer func() {
+			if cerr := application.Close(); cerr != nil {
+				logInstance.Error().Err(cerr).Msg("error during app close")
+			}
+		}()
 
 		// Create a context with cancellation for graceful shutdown.
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx, stop := context.WithCancel(context.Background())
+		defer stop()
 
 		// Listen for OS signals.
 		sigCh := make(chan os.Signal, 1)
@@ -55,7 +60,7 @@ var rootCmd = &cobra.Command{
 		go func() {
 			sig := <-sigCh
 			logInstance.Info().Msgf("Received signal: %v", sig)
-			cancel()
+			stop()
 		}()
 
 		// Run the application. When context is canceled, Run returns.
