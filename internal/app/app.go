@@ -7,6 +7,7 @@ import (
 
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
 	"github.com/auto-dns/docker-coredns-sync/internal/core"
+	"github.com/auto-dns/docker-coredns-sync/internal/event"
 	"github.com/auto-dns/docker-coredns-sync/internal/registry"
 	dockerCli "github.com/docker/docker/client"
 	"github.com/rs/zerolog"
@@ -14,23 +15,20 @@ import (
 )
 
 type App struct {
-	Config   *config.Config
-	Logger   zerolog.Logger
-	Registry registry.Registry
-	Watcher  core.DockerWatcher
-	Engine   *core.SyncEngine
+	dockerClient *dockerCli.Client
+	etcdClient   *clientv3.Client
+	engine       *core.SyncEngine
+	logger       zerolog.Logger
 }
 
-func getNewWatcher(logger zerolog.Logger) (core.DockerWatcher, error) {
+// New creates a new App by wiring up all dependencies.
+func New(cfg *config.Config, logger zerolog.Logger) (*App, error) {
 	dockerClient, err := dockerCli.NewClientWithOpts(dockerCli.FromEnv, dockerCli.WithAPIVersionNegotiation())
 	if err != nil {
 		return nil, err
 	}
-	watcher := core.NewDockerWatcherImpl(dockerClient, logger)
-	return watcher, nil
-}
+	gen := event.NewDockerGenerator(dockerClient, logger)
 
-func getNewRegistry(cfg *config.Config, logger zerolog.Logger) (registry.Registry, error) {
 	etcdClient, err := clientv3.New(clientv3.Config{
 		Endpoints:   cfg.Etcd.Endpoints,
 		DialTimeout: 2 * time.Second,
@@ -39,34 +37,35 @@ func getNewRegistry(cfg *config.Config, logger zerolog.Logger) (registry.Registr
 		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 	reg := registry.NewEtcdRegistry(etcdClient, &cfg.Etcd, cfg.App.Hostname, logger)
-	return reg, nil
-}
 
-// New creates a new App by wiring up all dependencies.
-func New(cfg *config.Config, logInstance zerolog.Logger) (*App, error) {
-	watcher, err := getNewWatcher(logInstance)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Docker watcher: %w", err)
-	}
-
-	reg, err := getNewRegistry(cfg, logInstance)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create etcd registry: %w", err)
-	}
-
-	engine := core.NewSyncEngine(logInstance, &cfg.App, watcher, reg)
+	engine := core.NewSyncEngine(logger, &cfg.App, gen, reg)
 
 	return &App{
-		Config:   cfg,
-		Logger:   logInstance,
-		Registry: reg,
-		Watcher:  watcher,
-		Engine:   engine,
+		dockerClient: dockerClient,
+		etcdClient:   etcdClient,
+		engine:       engine,
+		logger:       logger,
 	}, nil
 }
 
 // Run starts the application by running the sync engine.
 func (a *App) Run(ctx context.Context) error {
-	a.Logger.Info().Msg("Application starting")
-	return a.Engine.Run(ctx)
+	defer func() {}()
+	a.logger.Info().Msg("Application starting")
+	return a.engine.Run(ctx)
+}
+
+func (a *App) Close() error {
+	var firstErr error
+	if a.dockerClient != nil {
+		if err := a.dockerClient.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("close docker client: %w", err)
+		}
+	}
+	if a.etcdClient != nil {
+		if err := a.etcdClient.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("close etcd client: %w", err)
+		}
+	}
+	return firstErr
 }
