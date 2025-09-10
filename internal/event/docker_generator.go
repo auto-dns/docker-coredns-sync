@@ -29,7 +29,6 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 
 	go func() {
 		defer close(out)
-		defer func() { _ = dw.cli.Close() }()
 
 		since := time.Now()
 
@@ -42,7 +41,7 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 		}
 		for _, c := range containers {
 			select {
-			case out <- fromContainerToDomainContainerEvent(c):
+			case out <- fromContainerSummary(c):
 			case <-ctx.Done():
 				dw.logger.Info().Msg("Docker event generator cancelled during initial emit")
 				return
@@ -78,7 +77,7 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 					return
 				}
 
-				event, convErr := fromMsgToDomainContainerEvent(msg)
+				event, convErr := fromEventsMessage(msg)
 				if convErr != nil {
 					if _, ok := convErr.(*UnsupportedEventTypeError); ok {
 						dw.logger.Debug().Err(convErr).Msg("Error converting docker event message to container event")
@@ -99,34 +98,4 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 	}()
 
 	return out, nil
-}
-
-func fromContainerToDomainContainerEvent(c container.Summary) domain.ContainerEvent {
-	return domain.ContainerEvent{
-		Container: domain.Container{
-			Id:      c.ID,
-			Name:    c.Names[0],
-			Created: time.Unix(c.Created, 0),
-			Labels:  c.Labels,
-		},
-		EventType: domain.EventTypeInitialContainerDetection,
-	}
-}
-
-func fromMsgToDomainContainerEvent(msg events.Message) (domain.ContainerEvent, error) {
-	event := domain.ContainerEvent{
-		Container: domain.Container{
-			Id:      msg.ID,
-			Name:    msg.Actor.Attributes["name"],
-			Created: time.Unix(0, msg.TimeNano),
-			Labels:  msg.Actor.Attributes,
-		},
-		EventType: domain.EventType(msg.Status),
-	}
-
-	if !event.EventType.IsValid() {
-		return domain.ContainerEvent{}, NewUnsupportedEventTypeError(event.EventType)
-	}
-
-	return event, nil
 }
