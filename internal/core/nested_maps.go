@@ -1,7 +1,7 @@
 package core
 
 import (
-	"github.com/auto-dns/docker-coredns-sync/internal/intent"
+	"github.com/auto-dns/docker-coredns-sync/internal/domain"
 	"github.com/auto-dns/docker-coredns-sync/internal/util"
 )
 
@@ -11,11 +11,11 @@ type nestedRecordMap struct {
 }
 
 type typeMap struct {
-	*util.DefaultMap[string, *recordMap]
+	*util.DefaultMap[domain.RecordKind, *recordMap]
 }
 
 type recordMap struct {
-	*util.DefaultMap[string, *intent.RecordIntent]
+	*util.DefaultMap[string, *domain.RecordIntent]
 }
 
 // Create constructor functions
@@ -29,7 +29,7 @@ func newNestedRecordMap() *nestedRecordMap {
 
 func newTypeMap() *typeMap {
 	return &typeMap{
-		DefaultMap: util.NewDefaultMap[string](func() *recordMap {
+		DefaultMap: util.NewDefaultMap[domain.RecordKind](func() *recordMap {
 			return newRecordMap()
 		}),
 	}
@@ -37,15 +37,15 @@ func newTypeMap() *typeMap {
 
 func newRecordMap() *recordMap {
 	return &recordMap{
-		DefaultMap: util.NewDefaultMap[string](func() *intent.RecordIntent {
+		DefaultMap: util.NewDefaultMap[string](func() *domain.RecordIntent {
 			return nil
 		}),
 	}
 }
 
 // By nothing
-func (m nestedRecordMap) GetAllValues() []*intent.RecordIntent {
-	values := make([]*intent.RecordIntent, 0)
+func (m nestedRecordMap) GetAllValues() []*domain.RecordIntent {
+	values := make([]*domain.RecordIntent, 0)
 	for _, typeMap := range m.Values() {
 		for _, recordMap := range typeMap.Values() {
 			for _, recordIntent := range recordMap.Values() {
@@ -67,29 +67,29 @@ func (m nestedRecordMap) GetAllNames() []string {
 // By name
 
 // By name and type
-func (m nestedRecordMap) PeekNameTypeRecords(name, recordType string) ([]*intent.RecordIntent, bool) {
+func (m nestedRecordMap) PeekNameTypeRecords(name string, recordType domain.RecordKind) ([]*domain.RecordIntent, bool) {
 	if typeMap, exists := m.Peek(name); exists {
 		if recordMap, exists := typeMap.Peek(recordType); exists {
 			return recordMap.Values(), true
 		}
-		return []*intent.RecordIntent{}, false
+		return []*domain.RecordIntent{}, false
 	}
-	return []*intent.RecordIntent{}, false
+	return []*domain.RecordIntent{}, false
 }
 
 // DeleteDomainType removes all records of a specific type for a name
-func (m nestedRecordMap) DeleteNameType(name, recordType string) {
+func (m nestedRecordMap) DeleteNameType(name string, recordType domain.RecordKind) {
 	if domainMap, exists := m.Peek(name); exists {
 		domainMap.Delete(recordType)
 	}
 }
 
 // By name, type, and value
-func (m *nestedRecordMap) GetNameTypeRecord(name, recordType, value string) *intent.RecordIntent {
+func (m *nestedRecordMap) GetNameTypeRecord(name string, recordType domain.RecordKind, value string) *domain.RecordIntent {
 	return m.Get(name).Get(recordType).Get(value)
 }
 
-func (m *nestedRecordMap) PeekNameTypeRecord(name, recordType, value string) (*intent.RecordIntent, bool) {
+func (m *nestedRecordMap) PeekNameTypeRecord(name string, recordType domain.RecordKind, value string) (*domain.RecordIntent, bool) {
 	typeMap, exists := m.Peek(name)
 	if !exists {
 		return nil, false

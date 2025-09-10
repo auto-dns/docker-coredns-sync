@@ -2,12 +2,12 @@ package core
 
 import (
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
-	"github.com/auto-dns/docker-coredns-sync/internal/dns"
-	"github.com/auto-dns/docker-coredns-sync/internal/intent"
+	"github.com/auto-dns/docker-coredns-sync/internal/domain"
+
 	"github.com/rs/zerolog"
 )
 
-func shouldReplaceExisting(new, existing *intent.RecordIntent, logger zerolog.Logger) bool {
+func shouldReplaceExisting(new, existing *domain.RecordIntent, logger zerolog.Logger) bool {
 	l := logger.With().Str("reconciler", "filter").Str("new_record", new.Render()).Str("existing_record", existing.Render()).Logger()
 	if new.Force && !existing.Force {
 		l.Trace().Msg("Replacing existing record due to force label on new record")
@@ -23,7 +23,7 @@ func shouldReplaceExisting(new, existing *intent.RecordIntent, logger zerolog.Lo
 	return false
 }
 
-func shouldReplaceAllExisting(new *intent.RecordIntent, existing []*intent.RecordIntent, logger zerolog.Logger) bool {
+func shouldReplaceAllExisting(new *domain.RecordIntent, existing []*domain.RecordIntent, logger zerolog.Logger) bool {
 	// Returns True if `new` (CNAME) should replace all `existing` (A records).
 
 	// Rules:
@@ -97,33 +97,29 @@ func shouldReplaceAllExisting(new *intent.RecordIntent, existing []*intent.Recor
 
 // FilterRecordIntents receives a slice of RecordIntent (desired) and filters out conflicting ones.
 // It returns a reconciled slice of RecordIntent.
-func FilterRecordIntents(recordIntents []*intent.RecordIntent, logger zerolog.Logger) []*intent.RecordIntent {
+func FilterRecordIntents(recordIntents []*domain.RecordIntent, logger zerolog.Logger) []*domain.RecordIntent {
 	logger.Debug().Msg("Reconciling desired records against each other")
 
 	desiredByNameType := newNestedRecordMap()
 	for _, ri := range recordIntents {
-		record := ri.Record
-		name := record.GetName()
-		value := record.GetValue()
-
-		if _, ok := record.(*dns.ARecord); ok {
-			existingARecordIntent, duplicateExists := desiredByNameType.PeekNameTypeRecord(name, "A", value)
+		if ri.Record.IsA() {
+			existingARecordIntent, duplicateExists := desiredByNameType.PeekNameTypeRecord(ri.Record.Name, "A", ri.Record.Value)
 			if !duplicateExists || shouldReplaceExisting(ri, existingARecordIntent, logger) {
-				desiredByNameType.Get(name).Get("A").Set(value, ri)
+				desiredByNameType.Get(ri.Record.Name).Get("A").Set(ri.Record.Value, ri)
 			}
-		} else if _, ok := record.(*dns.CNAMERecord); ok {
-			if existingCNAMERecordIntents, exists := desiredByNameType.PeekNameTypeRecords(name, "CNAME"); exists {
+		} else if ri.Record.IsCNAME() {
+			if existingCNAMERecordIntents, exists := desiredByNameType.PeekNameTypeRecords(ri.Record.Name, "CNAME"); exists {
 				// Get existing CNAME record - assume only one
 				existingCNAMERecordIntent := existingCNAMERecordIntents[0]
 				if shouldReplaceExisting(ri, existingCNAMERecordIntent, logger) {
 					// Replace CNAME record
 					// Just calling the "Set" function isn't enough to prevent multiple CNAME records with different values
-					desiredByNameType.Get(name).Get("CNAME").Delete(existingCNAMERecordIntent.Record.GetValue())
-					desiredByNameType.Get(name).Get("CNAME").Set(value, ri)
+					desiredByNameType.Get(ri.Record.Name).Get("CNAME").Delete(existingCNAMERecordIntent.Record.Value)
+					desiredByNameType.Get(ri.Record.Name).Get("CNAME").Set(ri.Record.Value, ri)
 				}
 			} else {
 				// No conflict - just add it
-				desiredByNameType.Get(name).Get("CNAME").Set(value, ri)
+				desiredByNameType.Get(ri.Record.Name).Get("CNAME").Set(ri.Record.Value, ri)
 			}
 		}
 	}
@@ -135,19 +131,19 @@ func FilterRecordIntents(recordIntents []*intent.RecordIntent, logger zerolog.Lo
 		if aRecordsExist && !cnameRecordsExist {
 			// Transfer all A records into the "desired by name type deduplicated" set
 			for _, ri := range aRecords {
-				desiredByNameTypeDeduplicated.Get(name).Get("A").Set(ri.Record.GetValue(), ri)
+				desiredByNameTypeDeduplicated.Get(name).Get("A").Set(ri.Record.Value, ri)
 			}
 		} else if cnameRecordsExist && !aRecordsExist {
 			// Transfer the CNAME record into the "desired by name type deduplicated" set
 			ri := cnameRecords[0]
-			desiredByNameTypeDeduplicated.Get(name).Get("CNAME").Set(ri.Record.GetValue(), ri)
+			desiredByNameTypeDeduplicated.Get(name).Get("CNAME").Set(ri.Record.Value, ri)
 		} else if aRecordsExist && cnameRecordsExist {
 			cnameRecord := cnameRecords[0]
 			if shouldReplaceAllExisting(cnameRecord, aRecords, logger) {
-				desiredByNameTypeDeduplicated.Get(name).Get("CNAME").Set(cnameRecord.Record.GetValue(), cnameRecord)
+				desiredByNameTypeDeduplicated.Get(name).Get("CNAME").Set(cnameRecord.Record.Value, cnameRecord)
 			} else {
 				for _, ri := range aRecords {
-					desiredByNameTypeDeduplicated.Get(name).Get("A").Set(ri.Record.GetValue(), ri)
+					desiredByNameTypeDeduplicated.Get(name).Get("A").Set(ri.Record.Value, ri)
 				}
 			}
 		} else {
@@ -158,9 +154,9 @@ func FilterRecordIntents(recordIntents []*intent.RecordIntent, logger zerolog.Lo
 	return desiredByNameTypeDeduplicated.GetAllValues()
 }
 
-func ReconcileAndValidate(desired, actual []*intent.RecordIntent, cfg *config.AppConfig, logger zerolog.Logger) ([]*intent.RecordIntent, []*intent.RecordIntent) {
-	toAddMap := map[string]*intent.RecordIntent{}
-	toRemoveMap := map[string]*intent.RecordIntent{}
+func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.AppConfig, logger zerolog.Logger) ([]*domain.RecordIntent, []*domain.RecordIntent) {
+	toAddMap := map[string]*domain.RecordIntent{}
+	toRemoveMap := map[string]*domain.RecordIntent{}
 
 	actualByNameType := newNestedRecordMap()
 	desiredSet := make(map[string]struct{}, len(desired))
@@ -180,22 +176,16 @@ func ReconcileAndValidate(desired, actual []*intent.RecordIntent, cfg *config.Ap
 					ri.Record.Render(), ri.Hostname, cfg.Hostname)
 			}
 		} else {
-			name := ri.Record.GetName()
-			recordType := ri.Record.GetType()
-			value := ri.Record.GetValue()
-			actualByNameType.Get(name).Get(recordType).Set(value, ri)
+			actualByNameType.Get(ri.Record.Name).Get(ri.Record.Type).Set(ri.Record.Value, ri)
 		}
 	}
 
 	// Step 2: Reconcile each desired record
 	for _, desiredRecordIntent := range desired {
-		name := desiredRecordIntent.Record.GetName()
-		value := desiredRecordIntent.Record.GetValue()
+		evictions := map[string]*domain.RecordIntent{}
 
-		evictions := map[string]*intent.RecordIntent{}
-
-		if _, ok := desiredRecordIntent.Record.(*dns.ARecord); ok {
-			if actualRecordIntents, exists := actualByNameType.PeekNameTypeRecords(name, "CNAME"); exists {
+		if desiredRecordIntent.Record.IsA() {
+			if actualRecordIntents, exists := actualByNameType.PeekNameTypeRecords(desiredRecordIntent.Record.Name, "CNAME"); exists {
 				// Conflict: desired A, actual has CNAME(s)
 				actualRecordIntent := actualRecordIntents[0]
 				if desiredRecordIntent.Force {
@@ -216,7 +206,7 @@ func ReconcileAndValidate(desired, actual []*intent.RecordIntent, cfg *config.Ap
 					// We're not evicting, so skip the rest for this record
 					continue
 				}
-			} else if actualRecordIntent, exists := actualByNameType.PeekNameTypeRecord(name, "A", value); exists {
+			} else if actualRecordIntent, exists := actualByNameType.PeekNameTypeRecord(desiredRecordIntent.Record.Name, "A", desiredRecordIntent.Record.Value); exists {
 				if actualRecordIntent.Equal(*desiredRecordIntent) {
 					// Skip - we don't need to replace ourselves
 					continue
@@ -232,8 +222,8 @@ func ReconcileAndValidate(desired, actual []*intent.RecordIntent, cfg *config.Ap
 				}
 			}
 			// Else: don't skip - just add with no evictions - no need for an else statement, this will just work
-		} else if _, ok := desiredRecordIntent.Record.(*dns.CNAMERecord); ok {
-			if actualRecordIntents, exists := actualByNameType.PeekNameTypeRecords(name, "A"); exists {
+		} else if desiredRecordIntent.Record.IsCNAME() {
+			if actualRecordIntents, exists := actualByNameType.PeekNameTypeRecords(desiredRecordIntent.Record.Name, "A"); exists {
 				desiredOlderThanAllActual := true
 				for _, ri := range actualRecordIntents {
 					desiredOlderThanAllActual = desiredOlderThanAllActual && desiredRecordIntent.Created.Before(ri.Created)
@@ -256,7 +246,7 @@ func ReconcileAndValidate(desired, actual []*intent.RecordIntent, cfg *config.Ap
 				} else {
 					continue
 				}
-			} else if actualRecordIntents, exists := actualByNameType.PeekNameTypeRecords(name, "CNAME"); exists {
+			} else if actualRecordIntents, exists := actualByNameType.PeekNameTypeRecords(desiredRecordIntent.Record.Name, "CNAME"); exists {
 				actualRecordIntent := actualRecordIntents[0]
 				if actualRecordIntent.Equal(*desiredRecordIntent) {
 					// Skip - we don't need to replace ourselves
@@ -290,7 +280,7 @@ func ReconcileAndValidate(desired, actual []*intent.RecordIntent, cfg *config.Ap
 		for key := range evictions {
 			keysToRemove[key] = struct{}{}
 		}
-		var simulated []*intent.RecordIntent
+		var simulated []*domain.RecordIntent
 		for _, ri := range actual {
 			if _, exists := keysToRemove[ri.Key()]; !exists {
 				simulated = append(simulated, ri)
@@ -310,7 +300,7 @@ func ReconcileAndValidate(desired, actual []*intent.RecordIntent, cfg *config.Ap
 	}
 
 	// Step 5: Convert maps to slices
-	var toAdd, toRemove []*intent.RecordIntent
+	var toAdd, toRemove []*domain.RecordIntent
 	for _, r := range toAddMap {
 		toAdd = append(toAdd, r)
 	}
