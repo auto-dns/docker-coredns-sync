@@ -5,9 +5,7 @@ import (
 	"strings"
 
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
-	"github.com/auto-dns/docker-coredns-sync/internal/dns"
 	"github.com/auto-dns/docker-coredns-sync/internal/domain"
-	"github.com/auto-dns/docker-coredns-sync/internal/intent"
 	"github.com/rs/zerolog"
 )
 
@@ -23,8 +21,8 @@ func getForce(labels map[string]string, containerForceLabel, recordForceLabel st
 }
 
 // GetContainerRecordIntents parses the container event's labels and returns record intents.
-func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfig, logger zerolog.Logger) ([]*intent.RecordIntent, error) {
-	var intents []*intent.RecordIntent
+func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfig, logger zerolog.Logger) ([]*domain.RecordIntent, error) {
+	var intents []*domain.RecordIntent
 
 	labels := event.Container.Labels
 	prefix := cfg.DockerLabelPrefix
@@ -88,7 +86,7 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfi
 		}
 	}
 
-	recordIntents := []*intent.RecordIntent{}
+	recordIntents := []*domain.RecordIntent{}
 	containerID := event.Container.Id
 	containerName := event.Container.Name
 	containerCreated := event.Container.Created
@@ -113,26 +111,14 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfi
 			}
 		}
 
-		var rec dns.Record
-		var err error
+		rec, err := domain.NewFromString(recordType, name, value)
+		if err != nil {
+			logger.Error().Str("record_type", recordType).Msgf("parsing record")
+			continue
+		}
 		force := getForce(labels, containerForceLabel, fmt.Sprintf("%s.%s.force", prefix, strings.ToLower(recordType)))
 
-		switch recordType {
-		case "A":
-			rec, err = dns.NewARecord(name, value)
-		case "CNAME":
-			rec, err = dns.NewCNAMERecord(name, value)
-		default:
-			logger.Warn().Msgf("Unsupported record type %s", recordType)
-			continue
-		}
-
-		if err != nil {
-			logger.Warn().Msgf("Invalid %sRecord: %v", recordType, err)
-			continue
-		}
-
-		intent := &intent.RecordIntent{
+		intent := &domain.RecordIntent{
 			ContainerID:   containerID,
 			ContainerName: containerName,
 			Created:       containerCreated,
@@ -162,26 +148,14 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfi
 				}
 			}
 
-			var rec dns.Record
-			var err error
+			rec, err := domain.NewFromString(recordType, name, value)
+			if err != nil {
+				logger.Error().Str("alias", alias).Str("record_type", recordType).Msg("parsing record")
+				continue
+			}
 			force := getForce(labels, containerForceLabel, fmt.Sprintf("%s.%s.%s.force", prefix, strings.ToLower(recordType), alias))
 
-			switch recordType {
-			case "A":
-				rec, err = dns.NewARecord(name, value)
-			case "CNAME":
-				rec, err = dns.NewCNAMERecord(name, value)
-			default:
-				logger.Warn().Msgf("Unsupported record type %s for alias %s", recordType, alias)
-				continue
-			}
-
-			if err != nil {
-				logger.Warn().Msgf("Invalid %sRecord for alias %s: %v", recordType, alias, err)
-				continue
-			}
-
-			intent := &intent.RecordIntent{
+			intent := &domain.RecordIntent{
 				ContainerID:   containerID,
 				ContainerName: containerName,
 				Created:       containerCreated,
