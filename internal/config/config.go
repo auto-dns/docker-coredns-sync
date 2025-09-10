@@ -10,18 +10,30 @@ import (
 	"github.com/spf13/viper"
 )
 
-// AppConfig holds application-specific configuration.
-type AppConfig struct {
-	AllowedRecordTypes []string `mapstructure:"allowed_record_types"`
-	DockerLabelPrefix  string   `mapstructure:"docker_label_prefix"`
-	HostIP             string   `mapstructure:"host_ip"`
-	Hostname           string   `mapstructure:"hostname"`
-	PollInterval       int      `mapstructure:"poll_interval"`
+// Config is the top-level configuration struct.
+type Config struct {
+	App     AppConfig     `mapstructure:"app"`
+	Etcd    EtcdConfig    `mapstructure:"etcd"`
+	Logging LoggingConfig `mapstructure:"log"`
 }
 
-// LoggingConfig holds the logging-related configuration.
-type LoggingConfig struct {
-	Level string `mapstructure:"level"`
+// AppConfig holds application-specific configuration.
+type AppConfig struct {
+	RecordTypes       RecordTypesConfig `mapstructure:"record_types"`
+	DockerLabelPrefix string            `mapstructure:"docker_label_prefix"`
+	HostIP            string            `mapstructure:"host_ip"`
+	Hostname          string            `mapstructure:"hostname"`
+	PollInterval      int               `mapstructure:"poll_interval"`
+}
+
+type RecordTypesConfig struct {
+	A     RecordTypeConfig `mapstructure:"a"`
+	AAAA  RecordTypeConfig `mapstructure:"aaaa"`
+	CNAME RecordTypeConfig `mapstructure:"cname"`
+}
+
+type RecordTypeConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 // EtcdConfig holds etcd-related configuration.
@@ -33,14 +45,12 @@ type EtcdConfig struct {
 	LockRetryInterval float64  `mapstructure:"lock_retry_interval"`
 }
 
-// Config is the top-level configuration struct.
-type Config struct {
-	App     AppConfig     `mapstructure:"app"`
-	Etcd    EtcdConfig    `mapstructure:"etcd"`
-	Logging LoggingConfig `mapstructure:"log"`
+// LoggingConfig holds the logging-related configuration.
+type LoggingConfig struct {
+	Level string `mapstructure:"level"`
 }
 
-// Load initializes, loads, normalizes, and validates the config in one public call.
+// Load initializes, loads, and validates the config in one public call.
 func Load() (*Config, error) {
 	if err := initConfig(); err != nil {
 		return nil, err
@@ -50,8 +60,6 @@ func Load() (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unable to decode into struct: %w", err)
 	}
-
-	cfg.normalize()
 
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -87,7 +95,7 @@ func initConfig() error {
 	viper.SetDefault("app.allowed_record_types", []string{"A", "CNAME"})
 	viper.SetDefault("app.docker_label_prefix", "coredns")
 	viper.SetDefault("app.host_ip", "127.0.0.1")
-	viper.SetDefault("app.hostname", "your-hostname")
+	viper.SetDefault("app.hostname", "")
 	viper.SetDefault("app.poll_interval", 5)
 	viper.SetDefault("etcd.endpoints", []string{"http://localhost:2379"})
 	viper.SetDefault("etcd.path_prefix", "/skydns")
@@ -106,27 +114,16 @@ func initConfig() error {
 	return nil
 }
 
-// normalize adjusts config values to standard forms.
-func (c *Config) normalize() {
-	for i, rt := range c.App.AllowedRecordTypes {
-		c.App.AllowedRecordTypes[i] = strings.ToUpper(rt)
-	}
-}
-
 // validate checks for config consistency.
 func (c *Config) validate() error {
 	if c.App.DockerLabelPrefix == "" {
 		return fmt.Errorf("app.docker_label_prefix cannot be empty")
 	}
-	if len(c.App.AllowedRecordTypes) == 0 {
-		return fmt.Errorf("app.allowed_record_types must have at least one entry")
+
+	if !c.App.RecordTypes.A.Enabled && !c.App.RecordTypes.AAAA.Enabled && !c.App.RecordTypes.CNAME.Enabled {
+		return fmt.Errorf("app.record_types must have at least one record type enabled")
 	}
-	validTypes := map[string]struct{}{"A": {}, "CNAME": {}}
-	for _, t := range c.App.AllowedRecordTypes {
-		if _, ok := validTypes[t]; !ok {
-			return fmt.Errorf("unsupported record type in app.allowed_record_types: %s", t)
-		}
-	}
+
 	if c.App.DockerLabelPrefix == "" {
 		return fmt.Errorf("app.docker_label_prefix cannot be empty")
 	}
