@@ -13,5 +13,6 @@ type etcdClient interface {
 	Grant(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error)
 	Txn(ctx context.Context) clientv3.Txn
 	Revoke(ctx context.Context, id clientv3.LeaseID) (*clientv3.LeaseRevokeResponse, error)
+	KeepAlive(ctx context.Context, id clientv3.LeaseID) (<-chan *clientv3.LeaseKeepAliveResponse, error)
 	Close() error
 }

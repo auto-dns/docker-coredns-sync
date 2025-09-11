@@ -3,7 +3,6 @@ package registry
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/auto-dns/docker-coredns-sync/internal/domain"
@@ -37,16 +36,7 @@ func marshalEtcdValue(ri *domain.RecordIntent) (string, error) {
 }
 
 func unmarshalEtcdValue(key string, raw string, prefix string) (*domain.RecordIntent, error) {
-	name := strings.TrimPrefix(key, prefix)
-	name = strings.TrimPrefix(name, "/")
-	parts := strings.Split(name, "/")
-	if len(parts) > 0 && len(parts[len(parts)-1]) > 0 && parts[len(parts)-1][0] == 'x' {
-		parts = parts[:len(parts)-1]
-	}
-	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
-		parts[i], parts[j] = parts[j], parts[i]
-	}
-	fqdn := strings.Join(parts, ".")
+	fqdn := fqdnFromKey(prefix, key)
 
 	var wire etcdRecord
 	if err := json.Unmarshal([]byte(raw), &wire); err != nil {
@@ -58,13 +48,12 @@ func unmarshalEtcdValue(key string, raw string, prefix string) (*domain.RecordIn
 		return nil, err
 	}
 
-	ri := &domain.RecordIntent{
+	return &domain.RecordIntent{
 		ContainerId:   wire.OwnerContainerId,
 		ContainerName: wire.OwnerContainerName,
 		Created:       wire.Created,
 		Hostname:      wire.OwnerHostname,
 		Force:         wire.Force,
 		Record:        rec,
-	}
-	return ri, nil
+	}, nil
 }

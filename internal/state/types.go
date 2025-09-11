@@ -7,7 +7,7 @@ import (
 )
 
 type containerState struct {
-	ContainerID   string
+	ContainerId   string
 	ContainerName string
 	Created       time.Time
 	LastUpdated   time.Time
