@@ -25,7 +25,11 @@
 ### A Record
 
 - `coredns.a.name=foo.example.com`
-- `coredns.a.value=192.168.200.1` *(optional, defaults to `host_ip`)*
+- `coredns.a.value=192.168.1.123` *(optional, defaults to `host_ipv4`)*
+
+### AAAA Record
+- `coredns.a.name=foo.example.com`
+- `coredns.a.value=fd20:0:1::123` *(optional, defaults to `host_ipv6`)*
 
 ### CNAME Record
 
@@ -102,7 +106,8 @@ app:
     - A
     - CNAME
   docker_label_prefix: coredns
-  host_ip: 192.168.1.100
+  host_ipv4: 192.168.1.100
+  host_ipv6: fd20:0:1::100
   hostname: mozart
   poll_interval: 5
 
