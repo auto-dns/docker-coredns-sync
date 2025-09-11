@@ -84,7 +84,7 @@ func (er *EtcdRegistry) Register(ctx context.Context, ri *domain.RecordIntent) e
 
 func (er *EtcdRegistry) recordMatches(w etcdRecord, ri *domain.RecordIntent) bool {
 	return w.Host == ri.Record.Value &&
-		w.Kind == ri.Record.Kind &&
+		w.RecordKind == ri.Record.Kind &&
 		w.OwnerHostname == ri.Hostname &&
 		w.OwnerContainerName == ri.ContainerName &&
 		(ri.ContainerId == "" || w.OwnerContainerId == ri.ContainerId)
