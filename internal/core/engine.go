@@ -6,63 +6,36 @@ import (
 	"time"
 
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
-	"github.com/auto-dns/docker-coredns-sync/internal/registry"
+	"github.com/auto-dns/docker-coredns-sync/internal/domain"
 	"github.com/rs/zerolog"
 )
 
 // SyncEngine coordinates event ingestion, state updates, and registry reconciliation.
 type SyncEngine struct {
-	logger       zerolog.Logger
-	cfg          *config.AppConfig
-	watcher      DockerWatcher
-	stateTracker *StateTracker
-	registry     registry.Registry
+	logger zerolog.Logger
+	cfg    *config.AppConfig
+	gen    generator
+	state  state
+	reg    upstreamRegistry
 }
 
-func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, watcher DockerWatcher, reg registry.Registry) *SyncEngine {
+func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, reg upstreamRegistry, state state) *SyncEngine {
 	return &SyncEngine{
-		logger:       logger,
-		cfg:          cfg,
-		watcher:      watcher,
-		stateTracker: NewStateTracker(),
-		registry:     reg,
+		logger: logger,
+		cfg:    cfg,
+		gen:    gen,
+		reg:    reg,
+		state:  state,
 	}
 }
 
-func (se *SyncEngine) prepopulateState(ctx context.Context) error {
-	// You likely need a Docker client call to list current containers.
-	containers, err := se.watcher.ListRunningContainers(ctx)
-	if err != nil {
-		return err
-	}
-	for _, container := range containers {
-		// Convert container details to a ContainerEvent.
-		evt := ContainerEvent{
-			ID:      container.ID,
-			Name:    container.Name,
-			Status:  container.Status,
-			Created: container.Created,
-			Labels:  container.Labels,
-		}
-		// Build record intents for this container.
-		intents, err := GetContainerRecordIntents(evt, se.cfg, se.logger)
-		if err != nil {
-			se.logger.Error().Err(err).Msg("Error building record intents during prepopulation")
-			continue
-		}
-		if len(intents) > 0 {
-			se.stateTracker.Upsert(evt.ID, evt.Name, evt.Created, intents, "running")
-			se.logger.Info().Msgf("Prepopulated state for container %s", container.Name)
-		}
-	}
-	return nil
-}
-
-func (se *SyncEngine) handleEvent(evt ContainerEvent) {
-	if evt.ID == "" {
-		return
-	}
-	if evt.Status == "start" {
+func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
+	switch {
+	case evt.Container.Id == "":
+		se.logger.Warn().Str("event_payload", fmt.Sprintf("%+v", evt)).Msg("handled container event with no container id")
+	case !evt.EventType.IsValid():
+		se.logger.Warn().Str("container_id", evt.Container.Id).Str("event_type", string(evt.EventType)).Msg("handled unsupported event type")
+	case evt.EventType == domain.EventTypeInitialContainerDetection, evt.EventType == domain.EventTypeContainerStarted:
 		intents, err := GetContainerRecordIntents(evt, se.cfg, se.logger)
 		if err != nil {
 			se.logger.Error().Err(err).Msg("Error building record intents")
@@ -70,12 +43,12 @@ func (se *SyncEngine) handleEvent(evt ContainerEvent) {
 		}
 		// If intents are returned, update the state tracker.
 		if len(intents) > 0 {
-			se.stateTracker.Upsert(evt.ID, evt.Name, evt.Created, intents, "running")
-			se.logger.Info().Msgf("Upserted state for container %s", evt.ID)
+			se.state.Upsert(evt.Container.Id, evt.Container.Name, evt.Container.Created, intents, "running")
+			se.logger.Info().Msgf("Upserted state for container %s", evt.Container.Id)
 		}
-	} else {
-		if removed := se.stateTracker.MarkRemoved(evt.ID); removed {
-			se.logger.Info().Msgf("Marked container %s as removed", evt.ID)
+	case evt.EventType == domain.EventTypeContainerStopped, evt.EventType == domain.EventTypeContainerDied:
+		if removed := se.state.MarkRemoved(evt.Container.Id); removed {
+			se.logger.Info().Msgf("Marked container %s as removed", evt.Container.Id)
 		}
 	}
 }
@@ -83,39 +56,13 @@ func (se *SyncEngine) handleEvent(evt ContainerEvent) {
 func (se *SyncEngine) Run(ctx context.Context) error {
 	se.logger.Info().Msg("Starting SyncEngine")
 
-	// Step 1: Subscribe to Docker events (assume this is done elsewhere)
-	eventCh, err := se.watcher.Subscribe(ctx)
+	// Step 1: Subscribe to Docker events
+	eventCh, err := se.gen.Subscribe(ctx)
 	if err != nil {
 		return fmt.Errorf("Failed to subscribe to Docker events: %w", err)
 	}
 
-	// Step 2: Prepopulate state by listing running containers.
-	se.logger.Info().Msg("Prepopulating the state with currently running containers")
-	if err := se.prepopulateState(ctx); err != nil {
-		se.logger.Error().Err(err).Msg("Error during state prepopulation")
-	}
-
-	// Step 3. Drain any events that arrived during prepopulation.
-	// Use a non-blocking drain loop with a short timeout.
-	se.logger.Info().Msg("Draining events that arrived during container prepopulation")
-	drainTimeout := time.After(500 * time.Millisecond)
-	drained := false
-	for !drained {
-		select {
-		case evt, ok := <-eventCh:
-			if !ok {
-				se.logger.Info().Msg("Queue drained")
-				drained = true
-				break
-			}
-			se.handleEvent(evt)
-		case <-drainTimeout:
-			se.logger.Info().Msg("Drain timeout reached")
-			drained = true
-		}
-	}
-
-	// Step 4: Launch a goroutine to process incoming events and update the state tracker.
+	// Step 2: Launch a goroutine to process incoming events and update the state tracker.
 	se.logger.Info().Msg("Launching event processing goroutine")
 	go func() {
 		for {
@@ -133,7 +80,7 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 		}
 	}()
 
-	// Step 5: Launch the main reconciliation loop.
+	// Step 3: Launch the main reconciliation loop.
 	se.logger.Info().Msg("Launching reconciliation loop")
 	ticker := time.NewTicker(time.Duration(se.cfg.PollInterval) * time.Second)
 	defer ticker.Stop()
@@ -141,22 +88,22 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 		select {
 		case <-ticker.C:
 			se.logger.Debug().Msg("Reconciliation loop tick")
-			err := se.registry.LockTransaction(ctx, []string{"__global__"}, func() error {
-				actual, err := se.registry.List(ctx)
+			err := se.reg.LockTransaction(ctx, []string{"__global__"}, func() error {
+				actual, err := se.reg.List(ctx)
 				if err != nil {
 					return fmt.Errorf("Error listing registry records: %w", err)
 				}
-				desired := se.stateTracker.GetAllDesiredRecordIntents()
+				desired := se.state.GetAllDesiredRecordIntents()
 				// Filter out any internally inconsistent intents:
 				desiredReconciled := FilterRecordIntents(desired, se.logger)
 				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, se.logger)
 				for _, rec := range toRemove {
-					if err := se.registry.Remove(ctx, rec); err != nil {
+					if err := se.reg.Remove(ctx, rec); err != nil {
 						se.logger.Error().Err(err).Msg("Error removing record")
 					}
 				}
 				for _, rec := range toAdd {
-					if err := se.registry.Register(ctx, rec); err != nil {
+					if err := se.reg.Register(ctx, rec); err != nil {
 						se.logger.Error().Err(err).Msg("Error registering record")
 					}
 				}
@@ -167,8 +114,7 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 			}
 		case <-ctx.Done():
 			se.logger.Info().Msg("SyncEngine shutting down")
-			se.watcher.Stop()
-			err := se.registry.Close()
+			err := se.reg.Close()
 			if err != nil {
 				se.logger.Error().Err(err).Msg("Error closing registry")
 			}

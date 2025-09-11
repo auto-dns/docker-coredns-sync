@@ -3,88 +3,102 @@ package core
 import (
 	"fmt"
 
-	"github.com/auto-dns/docker-coredns-sync/internal/dns"
-	"github.com/auto-dns/docker-coredns-sync/internal/intent"
+	"github.com/auto-dns/docker-coredns-sync/internal/domain"
 	"github.com/rs/zerolog"
 )
 
-func ValidateRecord(newRecordIntent *intent.RecordIntent, existingRecordIntents []*intent.RecordIntent, logger zerolog.Logger) error {
+func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent, logger zerolog.Logger) error {
 	// Validates a proposed DNS record against the current known records.
 
 	// Rules enforced:
-	// 1. A and CNAME records may not coexist for the same name.
+	// 1. A/AAAA and CNAME records may not coexist for the same name.
 	// 2. No duplicate CNAMEs.
-	// 3. A records with the same IP are disallowed for the same name.
+	// 3. A/AAAA records with the same address are disallowed for the same name+family.
 	// 4. CNAMEs may not form resolution cycles.
-	newRecord := newRecordIntent.Record
+	newR := newRI.Record
 
-	_, isCname := newRecord.(*dns.CNAMERecord)
-	_, isA := newRecord.(*dns.ARecord)
+	// presence flags + duplicate checks per family
+	var sameNameCNAME bool
+	var sameNameAnyAddress bool
+	var dupAValue, dupAAAAValue bool
 
-	sameNameARecordsExist := false
-	identicalARecordExists := false
-	sameNameCNAMERecordsExist := false
-	// Forward map used for CNAME cycle detection
-	forwardMap := make(map[string]string)
-	for _, ri := range existingRecordIntents {
+	for _, ri := range existing {
 		r := ri.Record
-		sameName := r.GetName() == newRecord.GetName()
-		if _, ok := r.(*dns.ARecord); ok {
-			sameNameARecordsExist = sameNameARecordsExist || sameName
-			identicalARecordExists = identicalARecordExists || sameName && r.GetValue() == newRecord.GetValue()
-		} else if _, ok := r.(*dns.CNAMERecord); ok {
-			sameNameCNAMERecordsExist = sameNameCNAMERecordsExist || sameName
-			if _, exists := forwardMap[r.GetName()]; exists {
-				logger.Warn().Msg(fmt.Sprintf("Duplicate CNAME definitions detected in remote registry for domain %s", r.GetName()))
-			} else {
-				forwardMap[r.GetName()] = r.GetValue()
+		sameName := r.Name == newR.Name
+		sameValue := r.Value == newR.Value
+		switch {
+		case r.IsA():
+			if sameName {
+				sameNameAnyAddress = true
 			}
-		} else {
-			logger.Warn().Msg(fmt.Sprintf("Unknown record type in existing records: %s", ri.Record.GetType()))
+			if sameName && sameValue && newR.IsA() {
+				dupAValue = true
+			}
+		case r.IsAAAA():
+			if sameName {
+				sameNameAnyAddress = true
+			}
+			if sameName && sameValue && newR.IsAAAA() {
+				dupAAAAValue = true
+			}
+		case r.IsCNAME():
+			if sameName {
+				sameNameCNAME = true
+			}
+		default:
+			logger.Warn().Str("kind", string(r.Kind)).Msg(fmt.Sprintf("Unknown record kind in existing records"))
 		}
 	}
 
-	// Rule 1: A and CNAME with same name not allowed
-	if isA {
-		if sameNameCNAMERecordsExist {
-			return NewRecordValidationError(fmt.Sprintf("%s -> %s - cannot add an A record when a CNAME record exists with the same name", newRecord.GetName(), newRecord.GetValue()))
+	// Rule 1: CNAME cannot coexist any address records (A or AAAA)
+	if newR.IsCNAME() && sameNameAnyAddress {
+		return NewRecordValidationError(fmt.Sprintf("%s -> %s - cannot add a CNAME when A/AAAA records exist with the same name", newR.Name, newR.Value))
+	}
+	if (newR.IsAddress()) && sameNameCNAME {
+		return NewRecordValidationError(fmt.Sprintf("%s -> %s - cannot add A/AAAA when a CNAME exists with the same name", newR.Name, newR.Value))
+	}
+
+	// Rule 2: Only one CNAME per name
+	if newR.IsCNAME() && sameNameCNAME {
+		return NewRecordValidationError(fmt.Sprintf("%s -> %s - multiple CNAME records with the same name are not allowed", newR.Name, newR.Value))
+	}
+
+	// Rule 3: no duplicate address values per family
+	if newR.IsA() && dupAValue {
+		return NewRecordValidationError(fmt.Sprintf("%s -> %s - duplicate A record value not allowed", newR.Name, newR.Value))
+	}
+	if newR.IsAAAA() && dupAAAAValue {
+		return NewRecordValidationError(fmt.Sprintf("%s -> %s - duplicate AAAA record value not allowed", newR.Name, newR.Value))
+	}
+
+	// Rule 4: CNAME cycle detection
+	if newR.IsCNAME() {
+		forward := map[string]string{}
+		for _, ri := range existing {
+			if ri.Record.IsCNAME() {
+				if _, exists := forward[ri.Record.Name]; exists {
+					logger.Warn().Msg(fmt.Sprintf("Duplicate CNAME definitions detected in remote registry for domain %s", ri.Record.Name))
+				} else {
+					forward[ri.Record.Name] = ri.Record.Value
+				}
+			}
 		}
-	} else if isCname {
-		if sameNameARecordsExist {
-			return NewRecordValidationError(fmt.Sprintf("%s -> %s - cannot add a CNAME record when an A record exists with the same name", newRecord.GetName(), newRecord.GetValue()))
-		}
-	} else {
-		return NewRecordValidationError(fmt.Sprintf("%s - unsupported record type", newRecord.GetType()))
-	}
+		forward[newR.Name] = newR.Value
 
-	// Rule 2: Multiple CNAMEs with same name not allowed
-	if isCname && sameNameCNAMERecordsExist {
-		return NewRecordValidationError(fmt.Sprintf("%s -> %s - multiple CNAME records with the same name are not allowed", newRecord.GetName(), newRecord.GetValue()))
-	}
-
-	// Rule 3: Multiple A records with the same IP address not allowed
-	if isA && identicalARecordExists {
-		return NewRecordValidationError(fmt.Sprintf("%s -> %s - multiple A records with the same IP address are not allowed", newRecord.GetName(), newRecord.GetValue()))
-	}
-
-	// Rule 4: Detect cycles
-	if isCname {
-		forwardMap[newRecord.GetName()] = newRecord.GetValue()
-
-		// Process to detect loops
-		seenMap := make(map[string]struct{})
-		name := newRecord.GetName()
+		seen := map[string]struct{}{}
+		cur := newR.Name
 		for {
-			value, exists := forwardMap[name]
-			if !exists {
+			v, ok := forward[cur]
+			if !ok {
 				break
 			}
-			if _, seen := seenMap[name]; seen {
-				return NewRecordValidationError(fmt.Sprintf("CNAME cycle detected starting at: %s", newRecord.GetName()))
+			if _, s := seen[cur]; s {
+				return NewRecordValidationError(fmt.Sprintf("CNAME cycle detected starting at: %s", newR.Name))
 			}
-			seenMap[name] = struct{}{}
-			name = value
+			seen[cur] = struct{}{}
+			cur = v
 		}
 	}
+
 	return nil
 }

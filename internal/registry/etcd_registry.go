@@ -4,28 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
-
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
-	"github.com/auto-dns/docker-coredns-sync/internal/dns"
-	"github.com/auto-dns/docker-coredns-sync/internal/intent"
-	"github.com/auto-dns/docker-coredns-sync/internal/util"
+	"github.com/auto-dns/docker-coredns-sync/internal/domain"
 	"github.com/rs/zerolog"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
-
-type etcdClient interface {
-	Get(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error)
-	Put(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error)
-	Delete(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error)
-	Grant(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error)
-	Txn(ctx context.Context) clientv3.Txn
-	Revoke(ctx context.Context, id clientv3.LeaseID) (*clientv3.LeaseRevokeResponse, error)
-	Close() error
-}
 
 type EtcdRegistry struct {
 	client   etcdClient
@@ -39,211 +27,148 @@ func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string,
 		client:   client,
 		cfg:      cfg,
 		hostname: hostname,
-		logger:   logger,
+		logger:   logger.With().Str("component", "etcd_registry").Logger(),
 	}
 }
 
 // getNextIndexedKey generates a new etcd key for a record based on its fully qualified domain name (fqdn).
 func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (string, error) {
-	trimmed := strings.Trim(fqdn, ".")
-	parts := strings.Split(trimmed, ".")
-	parts_reversed := util.Reverse(parts)
-	baseKey := fmt.Sprintf("%s/%s", er.cfg.PathPrefix, strings.Join(parts_reversed, "/"))
-	existingIndices := make(map[int]struct{})
+	base := keyBaseForFQDN(er.cfg.PathPrefix, fqdn)
+	existing := make(map[int]struct{})
 
-	resp, err := er.client.Get(ctx, baseKey, clientv3.WithPrefix())
+	resp, err := er.client.Get(ctx, base, clientv3.WithPrefix(), clientv3.WithKeysOnly(), clientv3.WithSerializable())
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("list existing indices under %q: %w", base, err)
 	}
 	for _, kv := range resp.Kvs {
 		keyStr := string(kv.Key)
-		// Suffix is after the last "/" (expected to be "x<number>")
-		idx := strings.LastIndex(keyStr, "/")
-		if idx < 0 {
-			continue
-		}
-		suffix := keyStr[idx+1:]
-		base := keyStr[:idx]
-
-		if base != baseKey {
+		// ensure we're only looking at immediate children under base
+		if !strings.HasPrefix(keyStr, base+"/") {
 			continue
 		}
 
+		suffix := keyStr[len(base)+1:] // after trailing slash
 		if strings.HasPrefix(suffix, "x") {
-			numStr := suffix[1:]
-			num, err := strconv.Atoi(numStr)
-			if err == nil {
-				existingIndices[num] = struct{}{}
+			if n, err := strconv.Atoi(suffix[1:]); err == nil {
+				existing[n] = struct{}{}
 			}
 		}
 	}
-	index := 1
+	idx := 1
 	for {
-		if _, exists := existingIndices[index]; !exists {
+		if _, exists := existing[idx]; !exists {
 			break
 		}
-		index++
+		idx++
 	}
-	return fmt.Sprintf("%s/x%d", baseKey, index), nil
-}
-
-// getEtcdValue converts a RecordIntent to its JSON representation for storing in etcd.
-func (er *EtcdRegistry) getEtcdValue(ri *intent.RecordIntent) (string, error) {
-	// We assume that both ARecord and CNAMERecord implement dns.Record.
-	data := map[string]interface{}{
-		"host":                 ri.Record.GetValue(),
-		"record_type":          ri.Record.GetType(),
-		"owner_hostname":       ri.Hostname,
-		"owner_container_id":   ri.ContainerID,
-		"owner_container_name": ri.ContainerName,
-		"created":              ri.Created.Format(time.RFC3339),
-		"force":                ri.Force,
-	}
-	b, err := json.Marshal(data)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-// parseEtcdValue converts an etcd key/value pair into a RecordIntent.
-func (er *EtcdRegistry) parseEtcdValue(key, value string) (*intent.RecordIntent, error) {
-	// Remove the configured prefix.
-	path := strings.TrimPrefix(key, er.cfg.PathPrefix)
-	path = strings.TrimPrefix(path, "/")
-	parts := strings.Split(path, "/")
-	// If the last part is an index (starts with "x"), remove it.
-	if len(parts) > 0 {
-		last := parts[len(parts)-1]
-		if len(last) > 0 && last[0] == 'x' {
-			parts = parts[:len(parts)-1]
-		}
-	}
-	// Reconstruct FQDN by reversing parts.
-	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
-		parts[i], parts[j] = parts[j], parts[i]
-	}
-	fqdn := strings.Join(parts, ".")
-	var data map[string]interface{}
-	if err := json.Unmarshal([]byte(value), &data); err != nil {
-		return nil, err
-	}
-	recType, ok := data["record_type"].(string)
-	if !ok || recType == "" {
-		return nil, fmt.Errorf("missing record_type in etcd record: %v", data)
-	}
-	host, ok := data["host"].(string)
-	if !ok || host == "" {
-		return nil, fmt.Errorf("missing host in etcd record: %v", data)
-	}
-	ownerHostname, _ := data["owner_hostname"].(string)
-	ownerContainerID, _ := data["owner_container_id"].(string)
-	ownerContainerName, _ := data["owner_container_name"].(string)
-	createdStr, _ := data["created"].(string)
-	created, err := time.Parse(time.RFC3339, createdStr)
-	if err != nil {
-		return nil, err
-	}
-	force, _ := data["force"].(bool)
-
-	switch recType {
-	case "A", "a":
-		aRec, err := dns.NewARecord(fqdn, host)
-		if err != nil {
-			return nil, err
-		}
-		return &intent.RecordIntent{
-			ContainerID:   ownerContainerID,
-			ContainerName: ownerContainerName,
-			Created:       created,
-			Hostname:      ownerHostname,
-			Force:         force,
-			Record:        aRec,
-		}, nil
-	case "CNAME", "cname":
-		cnameRec, err := dns.NewCNAMERecord(fqdn, host)
-		if err != nil {
-			return nil, err
-		}
-		return &intent.RecordIntent{
-			ContainerID:   ownerContainerID,
-			ContainerName: ownerContainerName,
-			Created:       created,
-			Hostname:      ownerHostname,
-			Force:         force,
-			Record:        cnameRec,
-		}, nil
-	default:
-		return nil, fmt.Errorf("unknown record type: %s", recType)
-	}
+	return fmt.Sprintf("%s/x%d", base, idx), nil
 }
 
 // Register stores the record intent in etcd.
-func (er *EtcdRegistry) Register(ctx context.Context, ri *intent.RecordIntent) error {
-	fqdn := ri.Record.GetName()
+func (er *EtcdRegistry) Register(ctx context.Context, ri *domain.RecordIntent) error {
+	fqdn := ri.Record.Name
 	key, err := er.getNextIndexedKey(ctx, fqdn)
 	if err != nil {
-		return err
+		return fmt.Errorf("compute next key for %q: %w", fqdn, err)
 	}
-	value, err := er.getEtcdValue(ri)
+	value, err := marshalEtcdValue(ri)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal etcd value for %q: %w", fqdn, err)
 	}
-	_, err = er.client.Put(ctx, key, value)
-	return err
-}
-
-// Remove finds and deletes the etcd key that matches the record intent.
-func (er *EtcdRegistry) Remove(ctx context.Context, ri *intent.RecordIntent) error {
-	fqdn := ri.Record.GetName()
-	trimmed := strings.Trim(fqdn, ".")
-	parts := strings.Split(trimmed, ".")
-	// Reverse parts.
-	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
-		parts[i], parts[j] = parts[j], parts[i]
+	if _, err := er.client.Put(ctx, key, value); err != nil {
+		return fmt.Errorf("put key %q: %w", key, err)
 	}
-	baseKey := fmt.Sprintf("%s/%s", er.cfg.PathPrefix, strings.Join(parts, "/"))
-	resp, err := er.client.Get(ctx, baseKey, clientv3.WithPrefix())
-	if err != nil {
-		return err
-	}
-	for _, kv := range resp.Kvs {
-		keyStr := string(kv.Key)
-		var data map[string]interface{}
-		if err := json.Unmarshal(kv.Value, &data); err != nil {
-			er.logger.Warn().Err(err).Msgf("Could not parse key %s", keyStr)
-			continue
-		}
-		// Match based on record fields.
-		if data["host"] == ri.Record.GetValue() &&
-			data["record_type"] == ri.Record.GetType() &&
-			data["owner_hostname"] == ri.Hostname &&
-			data["owner_container_name"] == ri.ContainerName {
-			_, err := er.client.Delete(ctx, keyStr)
-			if err != nil {
-				er.logger.Warn().Err(err).Msgf("Failed to delete key %s", keyStr)
-				return err
-			}
-			er.logger.Info().Msgf("Deleted key %s", keyStr)
-			return nil
-		}
-	}
+	er.logger.Info().Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).Str("owner_container_id", ri.ContainerId).Str("key", key).Msg("registered record")
 	return nil
 }
 
-// List retrieves all record intents stored in etcd under the configured prefix.
-func (er *EtcdRegistry) List(ctx context.Context) ([]*intent.RecordIntent, error) {
-	prefix := er.cfg.PathPrefix
-	resp, err := er.client.Get(ctx, prefix, clientv3.WithPrefix())
+func (er *EtcdRegistry) recordMatches(w etcdRecord, ri *domain.RecordIntent) bool {
+	return w.Host == ri.Record.Value &&
+		w.Kind == ri.Record.Kind &&
+		w.OwnerHostname == ri.Hostname &&
+		w.OwnerContainerName == ri.ContainerName &&
+		(ri.ContainerId == "" || w.OwnerContainerId == ri.ContainerId)
+}
+
+// Remove finds and deletes the etcd key that matches the record domain.
+func (er *EtcdRegistry) Remove(ctx context.Context, ri *domain.RecordIntent) error {
+	base := keyBaseForFQDN(er.cfg.PathPrefix, ri.Record.Name)
+
+	resp, err := er.client.Get(ctx, base, clientv3.WithPrefix())
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("list keys under base %q: %w", base, err)
 	}
-	var intents []*intent.RecordIntent
+
+	// Collect keys to delete
+	toDelete := make([]string, 0, len(resp.Kvs))
 	for _, kv := range resp.Kvs {
 		keyStr := string(kv.Key)
-		ri, err := er.parseEtcdValue(keyStr, string(kv.Value))
+		if !strings.HasPrefix(keyStr, base+"/") {
+			continue
+		}
+		var wire etcdRecord
+		if err := json.Unmarshal(kv.Value, &wire); err != nil {
+			er.logger.Warn().Err(err).Str("key", keyStr).Msg("unmarshal etcd record")
+			continue
+		}
+		if er.recordMatches(wire, ri) {
+			toDelete = append(toDelete, keyStr)
+		}
+	}
+
+	if len(toDelete) == 0 {
+		er.logger.Debug().
+			Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).
+			Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).
+			Str("owner_container_name", ri.ContainerName).
+			Msg("remove: no matching keys")
+		return nil
+	}
+
+	// Delete all matches (keep going on errors)
+	// delete in batches to avoid overly-large transactions
+	const batchSize = 64
+	var firstErr error
+
+	for i := 0; i < len(toDelete); i += batchSize {
+		end := i + batchSize
+		if end > len(toDelete) {
+			end = len(toDelete)
+		}
+		batch := toDelete[i:end]
+
+		txn := er.client.Txn(ctx)
+		ops := make([]clientv3.Op, 0, len(batch))
+		for _, k := range batch {
+			ops = append(ops, clientv3.OpDelete(k))
+		}
+		if _, err := txn.Then(ops...).Commit(); err != nil {
+			er.logger.Warn().Err(err).Int("batch_start", i).Int("batch_end", end).Msg("remove: batch delete failed")
+			if firstErr == nil {
+				firstErr = fmt.Errorf("batch delete [%d:%d]: %w", i, end, err)
+			}
+		} else {
+			for _, k := range batch {
+				er.logger.Info().Str("key", k).Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).Str("owner_container_id", ri.ContainerId).Msg("remove: deleted record")
+			}
+		}
+	}
+
+	return firstErr
+}
+
+// List retrieves all record intents stored in etcd under the configured prefix.
+func (er *EtcdRegistry) List(ctx context.Context) ([]*domain.RecordIntent, error) {
+	prefix := er.cfg.PathPrefix
+	resp, err := er.client.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
+	if err != nil {
+		return nil, fmt.Errorf("list under prefix %q: %w", prefix, err)
+	}
+	intents := make([]*domain.RecordIntent, 0, len(resp.Kvs))
+	for _, kv := range resp.Kvs {
+		ri, err := unmarshalEtcdValue(string(kv.Key), string(kv.Value), er.cfg.PathPrefix)
 		if err != nil {
-			er.logger.Error().Err(err).Msgf("Failed to parse key: %s", keyStr)
+			er.logger.Warn().Err(err).Msgf("Failed to parse key: %s", kv.Key)
 			continue
 		}
 		intents = append(intents, ri)
@@ -256,11 +181,17 @@ func (er *EtcdRegistry) List(ctx context.Context) ([]*intent.RecordIntent, error
 // runs the function, and finally releases all locks.
 func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn func() error) error {
 	// Ensure unique sorted keys.
-	uniqueKeys := keys
-	leases := make([]struct {
-		lockKey string
-		lease   clientv3.LeaseID
-	}, 0)
+	uniq := make(map[string]struct{}, len(keys))
+	for _, k := range keys {
+		uniq[k] = struct{}{}
+	}
+	uniqueKeys := make([]string, 0, len(uniq))
+	for k := range uniq {
+		uniqueKeys = append(uniqueKeys, k)
+	}
+	sort.Strings(uniqueKeys)
+
+	leases := make([]heldLease, 0, len(uniqueKeys))
 
 	for _, key := range uniqueKeys {
 		lockKey := fmt.Sprintf("/locks/%s", key)
@@ -270,25 +201,52 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 		}
 		acquired := false
 		start := time.Now()
+
 		for time.Since(start) < time.Duration(er.cfg.LockTimeout)*time.Second {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
 			txnResp, err := er.client.Txn(ctx).
 				If(clientv3.Compare(clientv3.CreateRevision(lockKey), "=", 0)).
 				Then(clientv3.OpPut(lockKey, er.hostname, clientv3.WithLease(leaseResp.ID))).
 				Commit()
 			if err != nil {
-				return err
+				return fmt.Errorf("acquire lock %q: %w", lockKey, err)
 			}
 			if txnResp.Succeeded {
 				acquired = true
-				leases = append(leases, struct {
-					lockKey string
-					lease   clientv3.LeaseID
-				}{lockKey, leaseResp.ID})
+
+				// Start keepalive for this lease
+				kaCtx, cancel := context.WithCancel(ctx)
+				kaCh, err := er.client.KeepAlive(kaCtx, leaseResp.ID)
+				if err != nil {
+					cancel()
+					// best-effort cleanup
+					_, _ = er.client.Delete(ctx, lockKey)
+					_, _ = er.client.Revoke(ctx, leaseResp.ID)
+					return fmt.Errorf("keepalive for lock %q: %w", lockKey, err)
+				}
+
+				// Drain keepalive responses until cancel
+				go func() {
+					for range kaCh {
+						// noop; presence keeps the lease alive
+					}
+				}()
+
+				leases = append(leases, heldLease{lockKey: lockKey, lease: leaseResp.ID, cancel: cancel})
 				break
 			}
 			time.Sleep(time.Duration(er.cfg.LockRetryInterval * float64(time.Second)))
 		}
+
 		if !acquired {
+			if _, e := er.client.Revoke(ctx, leaseResp.ID); e != nil {
+				er.logger.Warn().Err(e).Str("lock", lockKey).Msg("revoke unused lease after acquire timeout")
+			}
 			return fmt.Errorf("failed to acquire lock on %s", key)
 		}
 	}
@@ -299,13 +257,12 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 	// Release the locks in reverse order.
 	for i := len(leases) - 1; i >= 0; i-- {
 		l := leases[i]
-		_, errDel := er.client.Delete(ctx, l.lockKey)
-		if errDel != nil {
-			er.logger.Warn().Err(errDel).Msgf("failed to delete lock key %s", l.lockKey)
+		l.cancel() // stop keepalive first
+		if _, e := er.client.Delete(ctx, l.lockKey); e != nil {
+			er.logger.Warn().Err(e).Msgf("failed to delete lock key %s", l.lockKey)
 		}
-		_, errRevoke := er.client.Revoke(ctx, l.lease)
-		if errRevoke != nil {
-			er.logger.Warn().Err(errRevoke).Msgf("failed to revoke lease for %s", l.lockKey)
+		if _, e := er.client.Revoke(ctx, l.lease); e != nil {
+			er.logger.Warn().Err(e).Msgf("failed to revoke lease for %s", l.lockKey)
 		}
 	}
 	return err

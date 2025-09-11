@@ -10,18 +10,20 @@ import (
 	"github.com/spf13/viper"
 )
 
-// AppConfig holds application-specific configuration.
-type AppConfig struct {
-	AllowedRecordTypes []string `mapstructure:"allowed_record_types"`
-	DockerLabelPrefix  string   `mapstructure:"docker_label_prefix"`
-	HostIP             string   `mapstructure:"host_ip"`
-	Hostname           string   `mapstructure:"hostname"`
-	PollInterval       int      `mapstructure:"poll_interval"`
+// Config is the top-level configuration struct.
+type Config struct {
+	App     AppConfig     `mapstructure:"app"`
+	Etcd    EtcdConfig    `mapstructure:"etcd"`
+	Logging LoggingConfig `mapstructure:"log"`
 }
 
-// LoggingConfig holds the logging-related configuration.
-type LoggingConfig struct {
-	Level string `mapstructure:"level"`
+// AppConfig holds application-specific configuration.
+type AppConfig struct {
+	DockerLabelPrefix string `mapstructure:"docker_label_prefix"`
+	HostIPv4          string `mapstructure:"host_ipv4"`
+	HostIPv6          string `mapstructure:"host_ipv6"`
+	Hostname          string `mapstructure:"hostname"`
+	PollInterval      int    `mapstructure:"poll_interval"`
 }
 
 // EtcdConfig holds etcd-related configuration.
@@ -33,14 +35,12 @@ type EtcdConfig struct {
 	LockRetryInterval float64  `mapstructure:"lock_retry_interval"`
 }
 
-// Config is the top-level configuration struct.
-type Config struct {
-	App     AppConfig     `mapstructure:"app"`
-	Etcd    EtcdConfig    `mapstructure:"etcd"`
-	Logging LoggingConfig `mapstructure:"log"`
+// LoggingConfig holds the logging-related configuration.
+type LoggingConfig struct {
+	Level string `mapstructure:"level"`
 }
 
-// Load initializes, loads, normalizes, and validates the config in one public call.
+// Load initializes, loads, and validates the config in one public call.
 func Load() (*Config, error) {
 	if err := initConfig(); err != nil {
 		return nil, err
@@ -50,8 +50,6 @@ func Load() (*Config, error) {
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unable to decode into struct: %w", err)
 	}
-
-	cfg.normalize()
 
 	if err := cfg.validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -84,10 +82,10 @@ func initConfig() error {
 	viper.AutomaticEnv()
 
 	// Set Viper defaults
-	viper.SetDefault("app.allowed_record_types", []string{"A", "CNAME"})
 	viper.SetDefault("app.docker_label_prefix", "coredns")
-	viper.SetDefault("app.host_ip", "127.0.0.1")
-	viper.SetDefault("app.hostname", "your-hostname")
+	viper.SetDefault("app.host_ipv4", "")
+	viper.SetDefault("app.host_ipv6", "")
+	viper.SetDefault("app.hostname", "")
 	viper.SetDefault("app.poll_interval", 5)
 	viper.SetDefault("etcd.endpoints", []string{"http://localhost:2379"})
 	viper.SetDefault("etcd.path_prefix", "/skydns")
@@ -106,32 +104,16 @@ func initConfig() error {
 	return nil
 }
 
-// normalize adjusts config values to standard forms.
-func (c *Config) normalize() {
-	for i, rt := range c.App.AllowedRecordTypes {
-		c.App.AllowedRecordTypes[i] = strings.ToUpper(rt)
-	}
-}
-
 // validate checks for config consistency.
 func (c *Config) validate() error {
 	if c.App.DockerLabelPrefix == "" {
 		return fmt.Errorf("app.docker_label_prefix cannot be empty")
 	}
-	if len(c.App.AllowedRecordTypes) == 0 {
-		return fmt.Errorf("app.allowed_record_types must have at least one entry")
+	if v := c.App.HostIPv4; v != "" && !isValidIPv4(v) {
+		return fmt.Errorf("app.host_ipv4 must be a valid IPv4 address, got: %q", v)
 	}
-	validTypes := map[string]struct{}{"A": {}, "CNAME": {}}
-	for _, t := range c.App.AllowedRecordTypes {
-		if _, ok := validTypes[t]; !ok {
-			return fmt.Errorf("unsupported record type in app.allowed_record_types: %s", t)
-		}
-	}
-	if c.App.DockerLabelPrefix == "" {
-		return fmt.Errorf("app.docker_label_prefix cannot be empty")
-	}
-	if net.ParseIP(c.App.HostIP) == nil {
-		return fmt.Errorf("app.host_ip must be a valid IP address")
+	if v := c.App.HostIPv6; v != "" && !isValidIPv6(v) {
+		return fmt.Errorf("app.host_ipv6 must be a valid IPv6 address, got: %q", v)
 	}
 	if c.App.Hostname == "" {
 		return fmt.Errorf("app.hostname cannot be empty")
@@ -166,4 +148,15 @@ func (c *Config) validate() error {
 		return fmt.Errorf("log.level must be a valid log level, got: %s", c.Logging.Level)
 	}
 	return nil
+}
+
+func isValidIPv4(s string) bool {
+	ip := net.ParseIP(strings.TrimSpace(s))
+	return ip != nil && ip.To4() != nil
+}
+
+func isValidIPv6(s string) bool {
+	ip := net.ParseIP(strings.TrimSpace(s))
+	// true IPv6: has a 16-byte form and is not IPv4-mapped (To4()==nil)
+	return ip != nil && ip.To16() != nil && ip.To4() == nil
 }
