@@ -82,7 +82,6 @@ func initConfig() error {
 	viper.AutomaticEnv()
 
 	// Set Viper defaults
-	viper.SetDefault("app.allowed_record_types", []string{"A", "CNAME"})
 	viper.SetDefault("app.docker_label_prefix", "coredns")
 	viper.SetDefault("app.host_ipv4", "")
 	viper.SetDefault("app.host_ipv6", "")
