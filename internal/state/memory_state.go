@@ -1,4 +1,4 @@
-package core
+package state
 
 import (
 	"sync"
@@ -7,34 +7,24 @@ import (
 	"github.com/auto-dns/docker-coredns-sync/internal/domain"
 )
 
-// ContainerState holds state derived from container events.
-type ContainerState struct {
-	ContainerID   string
-	ContainerName string
-	Created       time.Time
-	LastUpdated   time.Time
-	RecordIntents []*domain.RecordIntent
-	Status        string // "running", "removed"
-}
-
-// StateTracker stores container state safely.
-type StateTracker struct {
+// MemoryState stores container state safely.
+type MemoryState struct {
 	mu         sync.RWMutex
-	containers map[string]*ContainerState
+	containers map[string]*containerState
 }
 
 // NewStateTracker creates a new tracker.
-func NewStateTracker() *StateTracker {
-	return &StateTracker{
-		containers: make(map[string]*ContainerState),
+func NewMemoryState() *MemoryState {
+	return &MemoryState{
+		containers: make(map[string]*containerState),
 	}
 }
 
 // Upsert inserts or updates the state for a container.
-func (s *StateTracker) Upsert(containerID, containerName string, created time.Time, intents []*domain.RecordIntent, status string) {
+func (s *MemoryState) Upsert(containerID, containerName string, created time.Time, intents []*domain.RecordIntent, status string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.containers[containerID] = &ContainerState{
+	s.containers[containerID] = &containerState{
 		ContainerID:   containerID,
 		ContainerName: containerName,
 		Created:       created,
@@ -45,7 +35,7 @@ func (s *StateTracker) Upsert(containerID, containerName string, created time.Ti
 }
 
 // MarkRemoved marks a container state as removed.
-func (s *StateTracker) MarkRemoved(containerID string) bool {
+func (s *MemoryState) MarkRemoved(containerID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if state, exists := s.containers[containerID]; exists {
@@ -57,7 +47,7 @@ func (s *StateTracker) MarkRemoved(containerID string) bool {
 }
 
 // GetAllDesiredRecordIntents returns all record intents from running containers.
-func (s *StateTracker) GetAllDesiredRecordIntents() []*domain.RecordIntent {
+func (s *MemoryState) GetAllDesiredRecordIntents() []*domain.RecordIntent {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var intents []*domain.RecordIntent

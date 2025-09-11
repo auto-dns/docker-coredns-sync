@@ -83,8 +83,11 @@ func init() {
 	rootCmd.PersistentFlags().String("app.docker-label-prefix", "", "Prefix used for Docker labels (e.g., 'coredns')")
 	viper.BindPFlag("app.docker_label_prefix", rootCmd.PersistentFlags().Lookup("app.docker-label-prefix"))
 
-	rootCmd.PersistentFlags().String("app.host-ip", "", "Host IP address to use in A records")
-	viper.BindPFlag("app.host_ip", rootCmd.PersistentFlags().Lookup("app.host-ip"))
+	rootCmd.PersistentFlags().String("app.host-ipv4", "", "Host IPv4 address to use in A records")
+	viper.BindPFlag("app.host_ipv4", rootCmd.PersistentFlags().Lookup("app.host-ipv4"))
+
+	rootCmd.PersistentFlags().String("app.host-ipv6", "", "Host IPv6 address to use in AAAA records")
+	viper.BindPFlag("app.host_ipv6", rootCmd.PersistentFlags().Lookup("app.host-ipv6"))
 
 	rootCmd.PersistentFlags().String("app.hostname", "", "Logical hostname of this instance")
 	viper.BindPFlag("app.hostname", rootCmd.PersistentFlags().Lookup("app.hostname"))
