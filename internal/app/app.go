@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -61,16 +62,18 @@ func (a *App) Run(ctx context.Context) error {
 }
 
 func (a *App) Close() error {
-	var firstErr error
+	var err error
+
 	if a.dockerClient != nil {
-		if err := a.dockerClient.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("close docker client: %w", err)
+		if e := a.dockerClient.Close(); e != nil {
+			err = errors.Join(err, fmt.Errorf("close docker client: %w", e))
 		}
 	}
 	if a.etcdClient != nil {
-		if err := a.etcdClient.Close(); err != nil && firstErr == nil {
-			firstErr = fmt.Errorf("close etcd client: %w", err)
+		if e := a.etcdClient.Close(); e != nil {
+			err = errors.Join(err, fmt.Errorf("close etcd client: %w", e))
 		}
 	}
-	return firstErr
+
+	return err
 }
