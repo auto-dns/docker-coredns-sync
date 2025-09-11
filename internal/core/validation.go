@@ -18,7 +18,7 @@ func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent,
 	newR := newRI.Record
 
 	// presence flags + duplicate checks per family
-	var sameNameA, sameNameAAAA, sameNameCNAME bool
+	var sameNameCNAME bool
 	var sameNameAnyAddress bool
 	var dupAValue, dupAAAAValue bool
 
@@ -29,7 +29,6 @@ func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent,
 		switch {
 		case r.IsA():
 			if sameName {
-				sameNameA = true
 				sameNameAnyAddress = true
 			}
 			if sameName && sameValue && newR.IsA() {
@@ -37,7 +36,6 @@ func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent,
 			}
 		case r.IsAAAA():
 			if sameName {
-				sameNameAAAA = true
 				sameNameAnyAddress = true
 			}
 			if sameName && sameValue && newR.IsAAAA() {
