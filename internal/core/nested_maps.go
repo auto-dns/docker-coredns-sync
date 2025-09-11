@@ -77,7 +77,7 @@ func (m nestedRecordMap) PeekNameTypeRecords(name string, recordType domain.Reco
 	return []*domain.RecordIntent{}, false
 }
 
-// DeleteDomainType removes all records of a specific type for a name
+// DeleteNameType removes all records of a specific type for a name
 func (m nestedRecordMap) DeleteNameType(name string, recordType domain.RecordKind) {
 	if domainMap, exists := m.Peek(name); exists {
 		domainMap.Delete(recordType)

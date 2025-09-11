@@ -43,7 +43,7 @@ func New(cfg *config.Config, logger zerolog.Logger) (*App, error) {
 	// Engine
 	reg := registry.NewEtcdRegistry(etcdClient, &cfg.Etcd, cfg.App.Hostname, logger)
 	memState := state.NewMemoryState()
-	engine := core.NewSyncEngine(logger, cfg.App, gen, reg, memState)
+	engine := core.NewSyncEngine(logger, &cfg.App, gen, reg, memState)
 
 	return &App{
 		dockerClient: dockerClient,

@@ -13,13 +13,13 @@ import (
 // SyncEngine coordinates event ingestion, state updates, and registry reconciliation.
 type SyncEngine struct {
 	logger zerolog.Logger
-	cfg    config.AppConfig
+	cfg    *config.AppConfig
 	gen    generator
 	state  state
 	reg    upstreamRegistry
 }
 
-func NewSyncEngine(logger zerolog.Logger, cfg config.AppConfig, gen generator, reg upstreamRegistry, state state) *SyncEngine {
+func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, reg upstreamRegistry, state state) *SyncEngine {
 	return &SyncEngine{
 		logger: logger,
 		cfg:    cfg,
