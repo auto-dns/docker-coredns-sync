@@ -21,11 +21,11 @@ func NewMemoryState() *MemoryState {
 }
 
 // Upsert inserts or updates the state for a container.
-func (s *MemoryState) Upsert(containerID, containerName string, created time.Time, intents []*domain.RecordIntent, status string) {
+func (s *MemoryState) Upsert(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.containers[containerID] = &containerState{
-		ContainerID:   containerID,
+	s.containers[containerId] = &containerState{
+		ContainerId:   containerId,
 		ContainerName: containerName,
 		Created:       created,
 		RecordIntents: intents,
@@ -35,10 +35,10 @@ func (s *MemoryState) Upsert(containerID, containerName string, created time.Tim
 }
 
 // MarkRemoved marks a container state as removed.
-func (s *MemoryState) MarkRemoved(containerID string) bool {
+func (s *MemoryState) MarkRemoved(containerId string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if state, exists := s.containers[containerID]; exists {
+	if state, exists := s.containers[containerId]; exists {
 		state.Status = "removed"
 		state.LastUpdated = time.Now()
 		return true
