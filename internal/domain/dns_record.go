@@ -16,7 +16,7 @@ const (
 
 type Record struct {
 	Name  string
-	Type  RecordKind
+	Kind  RecordKind
 	Value string
 }
 
@@ -32,7 +32,7 @@ func NewA(name, ipv4 string) (Record, error) {
 
 	return Record{
 		Name:  name,
-		Type:  RecordA,
+		Kind:  RecordA,
 		Value: ipv4,
 	}, nil
 }
@@ -49,7 +49,7 @@ func NewAAAA(name, ipv6 string) (Record, error) {
 
 	return Record{
 		Name:  name,
-		Type:  RecordAAAA,
+		Kind:  RecordAAAA,
 		Value: ipv6,
 	}, nil
 }
@@ -61,24 +61,24 @@ func NewCNAME(name, target string) (Record, error) {
 
 	return Record{
 		Name:  name,
-		Type:  RecordCNAME,
+		Kind:  RecordCNAME,
 		Value: target,
 	}, nil
 }
 
 func (r Record) Key() string {
-	return fmt.Sprintf("%s|%s|%s", r.Name, r.Type, r.Value)
+	return fmt.Sprintf("%s|%s|%s", r.Name, r.Kind, r.Value)
 }
 
 func (r Record) Render() string {
 	if r.Value == "" {
-		return fmt.Sprintf("[%s] %s -> <no value>", r.Type, r.Name)
+		return fmt.Sprintf("[%s] %s -> <no value>", r.Kind, r.Name)
 	}
-	return fmt.Sprintf("[%s] %s -> %s", r.Type, r.Name, r.Value)
+	return fmt.Sprintf("[%s] %s -> %s", r.Kind, r.Name, r.Value)
 }
 
 func (r Record) Equal(o Record) bool {
-	return r.Name == o.Name && r.Type == o.Type && r.Value == o.Value
+	return r.Name == o.Name && r.Kind == o.Kind && r.Value == o.Value
 }
 
 var hostnameRegexp = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
@@ -87,7 +87,7 @@ func isValidHostname(h string) bool {
 	return len(h) > 0 && len(h) <= 255 && hostnameRegexp.MatchString(h)
 }
 
-func (r Record) IsA() bool       { return r.Type == RecordA }
-func (r Record) IsAAAA() bool    { return r.Type == RecordAAAA }
-func (r Record) IsCNAME() bool   { return r.Type == RecordCNAME }
-func (r Record) IsAddress() bool { return r.Type == RecordA || r.Type == RecordAAAA }
+func (r Record) IsA() bool       { return r.Kind == RecordA }
+func (r Record) IsAAAA() bool    { return r.Kind == RecordAAAA }
+func (r Record) IsCNAME() bool   { return r.Kind == RecordCNAME }
+func (r Record) IsAddress() bool { return r.Kind == RecordA || r.Kind == RecordAAAA }

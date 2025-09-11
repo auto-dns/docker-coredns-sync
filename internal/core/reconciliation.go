@@ -100,83 +100,83 @@ func shouldReplaceAllExisting(new *domain.RecordIntent, existing []*domain.Recor
 func FilterRecordIntents(recordIntents []*domain.RecordIntent, logger zerolog.Logger) []*domain.RecordIntent {
 	logger.Debug().Msg("Reconciling desired records against each other")
 
-	desiredByNameType := newNestedRecordMap()
+	desiredByNameKind := newNestedRecordMap()
 
-	// 1. Deduplicate per name+type using shouldReplaceExisting
+	// 1. Deduplicate per name+kind using shouldReplaceExisting
 	for _, ri := range recordIntents {
 		switch {
 		case ri.Record.IsA():
-			if existing, dup := desiredByNameType.PeekNameTypeRecord(ri.Record.Name, domain.RecordA, ri.Record.Value); !dup || shouldReplaceExisting(ri, existing, logger) {
-				desiredByNameType.Get(ri.Record.Name).Get(domain.RecordA).Set(ri.Record.Value, ri)
+			if existing, dup := desiredByNameKind.PeekNameKindRecord(ri.Record.Name, domain.RecordA, ri.Record.Value); !dup || shouldReplaceExisting(ri, existing, logger) {
+				desiredByNameKind.Get(ri.Record.Name).Get(domain.RecordA).Set(ri.Record.Value, ri)
 			}
 		case ri.Record.IsAAAA():
-			if existing, dup := desiredByNameType.PeekNameTypeRecord(ri.Record.Name, domain.RecordAAAA, ri.Record.Value); !dup || shouldReplaceExisting(ri, existing, logger) {
-				desiredByNameType.Get(ri.Record.Name).Get(domain.RecordAAAA).Set(ri.Record.Value, ri)
+			if existing, dup := desiredByNameKind.PeekNameKindRecord(ri.Record.Name, domain.RecordAAAA, ri.Record.Value); !dup || shouldReplaceExisting(ri, existing, logger) {
+				desiredByNameKind.Get(ri.Record.Name).Get(domain.RecordAAAA).Set(ri.Record.Value, ri)
 			}
 		case ri.Record.IsCNAME():
-			if cnames, exists := desiredByNameType.PeekNameTypeRecords(ri.Record.Name, domain.RecordCNAME); exists {
+			if cnames, exists := desiredByNameKind.PeekNameKindRecords(ri.Record.Name, domain.RecordCNAME); exists {
 				// Get existing CNAME record - assume only one
 				existing := cnames[0]
 				if shouldReplaceExisting(ri, existing, logger) {
-					desiredByNameType.Get(ri.Record.Name).Get(domain.RecordCNAME).Delete(existing.Record.Value)
-					desiredByNameType.Get(ri.Record.Name).Get(domain.RecordCNAME).Set(ri.Record.Value, ri)
+					desiredByNameKind.Get(ri.Record.Name).Get(domain.RecordCNAME).Delete(existing.Record.Value)
+					desiredByNameKind.Get(ri.Record.Name).Get(domain.RecordCNAME).Set(ri.Record.Value, ri)
 				}
 			} else {
 				// No conflict - just add it
-				desiredByNameType.Get(ri.Record.Name).Get(domain.RecordCNAME).Set(ri.Record.Value, ri)
+				desiredByNameKind.Get(ri.Record.Name).Get(domain.RecordCNAME).Set(ri.Record.Value, ri)
 			}
 		}
 	}
 
 	// 2. Resolve CNAME vs A/AAAA conflict per name
-	desiredByNameTypeDeduplicated := newNestedRecordMap()
-	for _, name := range desiredByNameType.GetAllNames() {
-		aRecs, hasA := desiredByNameType.PeekNameTypeRecords(name, domain.RecordA)
-		aaaaRecs, hasAAAA := desiredByNameType.PeekNameTypeRecords(name, domain.RecordAAAA)
-		cnameRecs, hasCNAME := desiredByNameType.PeekNameTypeRecords(name, domain.RecordCNAME)
+	desiredByNameKindDeduplicated := newNestedRecordMap()
+	for _, name := range desiredByNameKind.GetAllNames() {
+		aRecs, hasA := desiredByNameKind.PeekNameKindRecords(name, domain.RecordA)
+		aaaaRecs, hasAAAA := desiredByNameKind.PeekNameKindRecords(name, domain.RecordAAAA)
+		cnameRecs, hasCNAME := desiredByNameKind.PeekNameKindRecords(name, domain.RecordCNAME)
 
 		switch {
 		case hasCNAME && !(hasA || hasAAAA):
 			// Keep the single CNAME
 			ri := cnameRecs[0]
-			desiredByNameTypeDeduplicated.Get(name).Get(domain.RecordCNAME).Set(ri.Record.Value, ri)
+			desiredByNameKindDeduplicated.Get(name).Get(domain.RecordCNAME).Set(ri.Record.Value, ri)
 
 		case (hasA || hasAAAA) && !hasCNAME:
 			for _, ri := range aRecs {
-				desiredByNameTypeDeduplicated.Get(name).Get(domain.RecordA).Set(ri.Record.Value, ri)
+				desiredByNameKindDeduplicated.Get(name).Get(domain.RecordA).Set(ri.Record.Value, ri)
 			}
 			for _, ri := range aaaaRecs {
-				desiredByNameTypeDeduplicated.Get(name).Get(domain.RecordAAAA).Set(ri.Record.Value, ri)
+				desiredByNameKindDeduplicated.Get(name).Get(domain.RecordAAAA).Set(ri.Record.Value, ri)
 			}
 
 		case hasCNAME && (hasA || hasAAAA):
 			cnameRecord := cnameRecs[0]
-			allAddr, _ := addrRecords(desiredByNameType, name)
+			allAddr, _ := addrRecords(desiredByNameKind, name)
 
 			if shouldReplaceAllExisting(cnameRecord, allAddr, logger) {
-				desiredByNameTypeDeduplicated.Get(name).Get(domain.RecordCNAME).Set(cnameRecord.Record.Value, cnameRecord)
+				desiredByNameKindDeduplicated.Get(name).Get(domain.RecordCNAME).Set(cnameRecord.Record.Value, cnameRecord)
 			} else {
 				for _, ri := range aRecs {
-					desiredByNameTypeDeduplicated.Get(name).Get(domain.RecordA).Set(ri.Record.Value, ri)
+					desiredByNameKindDeduplicated.Get(name).Get(domain.RecordA).Set(ri.Record.Value, ri)
 				}
 				for _, ri := range aaaaRecs {
-					desiredByNameTypeDeduplicated.Get(name).Get(domain.RecordAAAA).Set(ri.Record.Value, ri)
+					desiredByNameKindDeduplicated.Get(name).Get(domain.RecordAAAA).Set(ri.Record.Value, ri)
 				}
 			}
 
 		default:
-			logger.Warn().Str("name", name).Msg("Found a record name with no supported record types. Skipping.")
+			logger.Warn().Str("name", name).Msg("Found a record name with no supported record kind. Skipping.")
 		}
 	}
 
-	return desiredByNameTypeDeduplicated.GetAllValues()
+	return desiredByNameKindDeduplicated.GetAllValues()
 }
 
 func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.AppConfig, logger zerolog.Logger) ([]*domain.RecordIntent, []*domain.RecordIntent) {
 	toAddMap := map[string]*domain.RecordIntent{}
 	toRemoveMap := map[string]*domain.RecordIntent{}
 
-	actualByNameType := newNestedRecordMap()
+	actualByNameKind := newNestedRecordMap()
 	desiredSet := make(map[string]struct{}, len(desired))
 	for _, ri := range desired {
 		desiredSet[ri.Key()] = struct{}{}
@@ -192,7 +192,7 @@ func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.Ap
 				logger.Debug().Msgf("Skipping removal of record %s not owned by this host (%s != %s)", ri.Record.Render(), ri.Hostname, cfg.Hostname)
 			}
 		} else {
-			actualByNameType.Get(ri.Record.Name).Get(ri.Record.Type).Set(ri.Record.Value, ri)
+			actualByNameKind.Get(ri.Record.Name).Get(ri.Record.Kind).Set(ri.Record.Value, ri)
 		}
 	}
 
@@ -203,7 +203,7 @@ func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.Ap
 		switch {
 		case d.Record.IsA():
 			// A vs CNAME
-			if cnames, ok := actualByNameType.PeekNameTypeRecords(d.Record.Name, domain.RecordCNAME); ok {
+			if cnames, ok := actualByNameKind.PeekNameKindRecords(d.Record.Name, domain.RecordCNAME); ok {
 				existing := cnames[0]
 				if d.Force || d.Created.Before(existing.Created) {
 					for _, r := range cnames {
@@ -213,7 +213,7 @@ func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.Ap
 				} else {
 					continue
 				}
-			} else if r, ok := actualByNameType.PeekNameTypeRecord(d.Record.Name, domain.RecordA, d.Record.Value); ok {
+			} else if r, ok := actualByNameKind.PeekNameKindRecord(d.Record.Name, domain.RecordA, d.Record.Value); ok {
 				// Same A exists - replace only if d wins
 				if r.Equal(*d) {
 					continue
@@ -226,7 +226,7 @@ func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.Ap
 			}
 
 		case d.Record.IsAAAA():
-			if cnames, ok := actualByNameType.PeekNameTypeRecords(d.Record.Name, domain.RecordCNAME); ok {
+			if cnames, ok := actualByNameKind.PeekNameKindRecords(d.Record.Name, domain.RecordCNAME); ok {
 				existing := cnames[0]
 				if d.Force || d.Created.Before(existing.Created) {
 					for _, r := range cnames {
@@ -236,7 +236,7 @@ func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.Ap
 				} else {
 					continue
 				}
-			} else if r, ok := actualByNameType.PeekNameTypeRecord(d.Record.Name, domain.RecordAAAA, d.Record.Value); ok {
+			} else if r, ok := actualByNameKind.PeekNameKindRecord(d.Record.Name, domain.RecordAAAA, d.Record.Value); ok {
 				// Same AAAA exists — replace only if d wins
 				if r.Equal(*d) {
 					continue
@@ -250,7 +250,7 @@ func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.Ap
 
 		case d.Record.IsCNAME():
 			// CNAME vs A/AAAA
-			if allAddr, hasAddr := addrRecords(actualByNameType, d.Record.Name); hasAddr {
+			if allAddr, hasAddr := addrRecords(actualByNameKind, d.Record.Name); hasAddr {
 				olderThanAll := true
 				for _, r := range allAddr {
 					if !d.Created.Before(r.Created) {
@@ -267,7 +267,7 @@ func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.Ap
 				} else {
 					continue
 				}
-			} else if cnames, ok := actualByNameType.PeekNameTypeRecords(d.Record.Name, domain.RecordCNAME); ok {
+			} else if cnames, ok := actualByNameKind.PeekNameKindRecords(d.Record.Name, domain.RecordCNAME); ok {
 				existing := cnames[0]
 				if existing.Equal(*d) {
 					continue
@@ -326,8 +326,8 @@ func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.Ap
 }
 
 func addrRecords(m *nestedRecordMap, name string) ([]*domain.RecordIntent, bool) {
-	a, hasA := m.PeekNameTypeRecords(name, domain.RecordA)
-	aaaa, hasAAAA := m.PeekNameTypeRecords(name, domain.RecordAAAA)
+	a, hasA := m.PeekNameKindRecords(name, domain.RecordA)
+	aaaa, hasAAAA := m.PeekNameKindRecords(name, domain.RecordAAAA)
 	if !hasA && !hasAAAA {
 		return nil, false
 	}

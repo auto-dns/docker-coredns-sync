@@ -14,7 +14,7 @@ func ParseKind(s string) (RecordKind, error) {
 	case "CNAME":
 		return RecordCNAME, nil
 	default:
-		return "", fmt.Errorf("unsupported record type %q", s)
+		return "", fmt.Errorf("unsupported record kind %q", s)
 	}
 }
 
