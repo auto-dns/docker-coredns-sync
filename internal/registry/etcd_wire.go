@@ -10,7 +10,7 @@ import (
 
 type etcdRecord struct {
 	Host               string            `json:"host"`
-	Kind               domain.RecordKind `json:"kind"`
+	Kind               domain.RecordKind `json:"record_type"`
 	OwnerHostname      string            `json:"owner_hostname"`
 	OwnerContainerId   string            `json:"owner_container_id"`
 	OwnerContainerName string            `json:"owner_container_name"`
