@@ -52,7 +52,7 @@ func ParseLabels(prefix string, labels map[string]string) ParsedLabels {
 		pl.ContainerForce = b
 	}
 
-	// aggregate by (recordType|alias)
+	// aggregate by (kind|alias)
 	type aggregation struct {
 		kind  domain.RecordKind
 		alias string
@@ -75,8 +75,8 @@ func ParseLabels(prefix string, labels map[string]string) ParsedLabels {
 			continue
 		}
 
-		rawType := parts[1]
-		kind, err := domain.ParseKind(rawType)
+		rawKind := parts[1]
+		kind, err := domain.ParseKind(rawKind)
 		if err != nil {
 			// unknown record kind; skip
 			continue

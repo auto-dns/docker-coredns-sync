@@ -55,7 +55,7 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfi
 				logger.Warn().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. Skipping.", nameLabel, valueLabel)
 				continue
 			default:
-				logger.Warn().Str("record_type", string(labeledRecord.Kind)).Msg("unsupported record type")
+				logger.Warn().Str("kind", string(labeledRecord.Kind)).Msg("unsupported record kind")
 			}
 		}
 

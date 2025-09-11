@@ -46,7 +46,7 @@ func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent,
 				sameNameCNAME = true
 			}
 		default:
-			logger.Warn().Str("type", string(r.Type)).Msg(fmt.Sprintf("Unknown record type in existing records"))
+			logger.Warn().Str("kind", string(r.Kind)).Msg(fmt.Sprintf("Unknown record kind in existing records"))
 		}
 	}
 

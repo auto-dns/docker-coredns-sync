@@ -78,13 +78,13 @@ func (er *EtcdRegistry) Register(ctx context.Context, ri *domain.RecordIntent) e
 	if _, err := er.client.Put(ctx, key, value); err != nil {
 		return fmt.Errorf("put key %q: %w", key, err)
 	}
-	er.logger.Info().Str("fqdn", ri.Record.Name).Str("type", string(ri.Record.Type)).Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).Str("owner_container_id", ri.ContainerId).Str("key", key).Msg("registered record")
+	er.logger.Info().Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).Str("owner_container_id", ri.ContainerId).Str("key", key).Msg("registered record")
 	return nil
 }
 
 func (er *EtcdRegistry) recordMatches(w etcdRecord, ri *domain.RecordIntent) bool {
 	return w.Host == ri.Record.Value &&
-		w.RecordType == ri.Record.Type &&
+		w.Kind == ri.Record.Kind &&
 		w.OwnerHostname == ri.Hostname &&
 		w.OwnerContainerName == ri.ContainerName &&
 		(ri.ContainerId == "" || w.OwnerContainerId == ri.ContainerId)
@@ -118,7 +118,7 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *domain.RecordIntent) err
 
 	if len(toDelete) == 0 {
 		er.logger.Debug().
-			Str("fqdn", ri.Record.Name).Str("type", string(ri.Record.Type)).
+			Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).
 			Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).
 			Str("owner_container_name", ri.ContainerName).
 			Msg("remove: no matching keys")
@@ -149,7 +149,7 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *domain.RecordIntent) err
 			}
 		} else {
 			for _, k := range batch {
-				er.logger.Info().Str("key", k).Str("fqdn", ri.Record.Name).Str("type", string(ri.Record.Type)).Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).Str("owner_container_id", ri.ContainerId).Msg("remove: deleted record")
+				er.logger.Info().Str("key", k).Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).Str("owner_container_id", ri.ContainerId).Msg("remove: deleted record")
 			}
 		}
 	}
