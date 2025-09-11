@@ -9,14 +9,14 @@ import (
 )
 
 // GetContainerRecordIntents parses the container event's labels and returns record intents.
-func GetContainerRecordIntents(event domain.ContainerEvent, cfg config.AppConfig, logger zerolog.Logger) ([]*domain.RecordIntent, error) {
+func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfig, logger zerolog.Logger) ([]*domain.RecordIntent, error) {
 	var intents []*domain.RecordIntent
 
 	prefix := cfg.DockerLabelPrefix
 	parsedLabels := ParseLabels(prefix, event.Container.Labels)
 
 	if !parsedLabels.Enabled {
-		logger.Debug().Msg("Record generation disabled via label")
+		logger.Debug().Msg("Record generation not enabled for container")
 		return intents, nil
 	}
 
@@ -31,7 +31,7 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg config.AppConfig
 		// Handle empty value
 		// -- For A and AAAA, use config value for default
 		value := strings.TrimSpace(labeledRecord.Value)
-		if labeledRecord.Value == "" {
+		if value == "" {
 			nameLabel := labeledRecord.GetNameLabel()
 			valueLabel := labeledRecord.GetValueLabel()
 			switch labeledRecord.Kind {
@@ -41,7 +41,7 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg config.AppConfig
 					logger.Warn().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. No default value configured. Skipping.", nameLabel, valueLabel)
 					continue
 				} else {
-					logger.Warn().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. Using host IP %s", nameLabel, valueLabel, value)
+					logger.Debug().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. Using host IP %s", nameLabel, valueLabel, value)
 				}
 			case domain.RecordAAAA:
 				value = cfg.HostIPv6
@@ -49,7 +49,7 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg config.AppConfig
 					logger.Warn().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. No default value configured. Skipping.", nameLabel, valueLabel)
 					continue
 				} else {
-					logger.Warn().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. Using host IP %s", nameLabel, valueLabel, value)
+					logger.Debug().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. Using host IP %s", nameLabel, valueLabel, value)
 				}
 			case domain.RecordCNAME:
 				logger.Warn().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. Skipping.", nameLabel, valueLabel)

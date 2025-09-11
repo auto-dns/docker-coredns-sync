@@ -11,17 +11,17 @@ func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent,
 	// Validates a proposed DNS record against the current known records.
 
 	// Rules enforced:
-	// 1. A and CNAME records may not coexist for the same name.
+	// 1. A/AAAA and CNAME records may not coexist for the same name.
 	// 2. No duplicate CNAMEs.
-	// 3. A records with the same IP are disallowed for the same name.
+	// 3. A/AAAA records with the same address are disallowed for the same name+family.
 	// 4. CNAMEs may not form resolution cycles.
 	newR := newRI.Record
 
 	// presence flags + duplicate checks per family
 	var sameNameA, sameNameAAAA, sameNameCNAME bool
+	var sameNameAnyAddress bool
 	var dupAValue, dupAAAAValue bool
 
-	// TODO: New - remove comment
 	for _, ri := range existing {
 		r := ri.Record
 		sameName := r.Name == newR.Name
@@ -30,6 +30,7 @@ func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent,
 		case r.IsA():
 			if sameName {
 				sameNameA = true
+				sameNameAnyAddress = true
 			}
 			if sameName && sameValue && newR.IsA() {
 				dupAValue = true
@@ -37,6 +38,7 @@ func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent,
 		case r.IsAAAA():
 			if sameName {
 				sameNameAAAA = true
+				sameNameAnyAddress = true
 			}
 			if sameName && sameValue && newR.IsAAAA() {
 				dupAAAAValue = true
@@ -51,10 +53,10 @@ func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent,
 	}
 
 	// Rule 1: CNAME cannot coexist any address records (A or AAAA)
-	if newR.IsCNAME() && (sameNameA || sameNameAAAA) {
+	if newR.IsCNAME() && sameNameAnyAddress {
 		return NewRecordValidationError(fmt.Sprintf("%s -> %s - cannot add a CNAME when A/AAAA records exist with the same name", newR.Name, newR.Value))
 	}
-	if (newR.IsA() || newR.IsAAAA()) && sameNameCNAME {
+	if (newR.IsAddress()) && sameNameCNAME {
 		return NewRecordValidationError(fmt.Sprintf("%s -> %s - cannot add A/AAAA when a CNAME exists with the same name", newR.Name, newR.Value))
 	}
 

@@ -63,11 +63,6 @@ func ParseLabels(prefix string, labels map[string]string) ParsedLabels {
 
 	aggregations := map[string]*aggregation{}
 
-	setForce := func(s string) *bool {
-		b := strings.ToLower(s) == "true"
-		return &b
-	}
-
 	// Loop over remaining labels
 	for k, v := range labels {
 		// Skip labels not in scope for this app
@@ -111,11 +106,12 @@ func ParseLabels(prefix string, labels map[string]string) ParsedLabels {
 
 		switch field {
 		case "name":
-			a.name = v
+			a.name = strings.TrimSpace(v)
 		case "value":
-			a.value = v
+			a.value = strings.TrimSpace(v)
 		case "force":
-			a.force = setForce(v)
+			force := boolFromLabel(v)
+			a.force = &force
 		}
 	}
 
@@ -133,3 +129,5 @@ func ParseLabels(prefix string, labels map[string]string) ParsedLabels {
 
 	return pl
 }
+
+func boolFromLabel(v string) bool { return strings.EqualFold(strings.TrimSpace(v), "true") }

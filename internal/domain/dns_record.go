@@ -87,6 +87,7 @@ func isValidHostname(h string) bool {
 	return len(h) > 0 && len(h) <= 255 && hostnameRegexp.MatchString(h)
 }
 
-func (r Record) IsA() bool     { return r.Type == RecordA }
-func (r Record) IsAAAA() bool  { return r.Type == RecordAAAA }
-func (r Record) IsCNAME() bool { return r.Type == RecordCNAME }
+func (r Record) IsA() bool       { return r.Type == RecordA }
+func (r Record) IsAAAA() bool    { return r.Type == RecordAAAA }
+func (r Record) IsCNAME() bool   { return r.Type == RecordCNAME }
+func (r Record) IsAddress() bool { return r.Type == RecordA || r.Type == RecordAAAA }
