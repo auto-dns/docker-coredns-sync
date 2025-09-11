@@ -77,9 +77,6 @@ func init() {
 	viper.BindPFlag("config", rootCmd.PersistentFlags().Lookup("config"))
 
 	// AppConfig Flags
-	rootCmd.PersistentFlags().StringSlice("app.allowed-record-types", nil, "Comma-separated list of allowed DNS record types (e.g., A,CNAME)")
-	viper.BindPFlag("app.allowed_record_types", rootCmd.PersistentFlags().Lookup("app.allowed-record-types"))
-
 	rootCmd.PersistentFlags().String("app.docker-label-prefix", "", "Prefix used for Docker labels (e.g., 'coredns')")
 	viper.BindPFlag("app.docker_label_prefix", rootCmd.PersistentFlags().Lookup("app.docker-label-prefix"))
 
