@@ -12,20 +12,20 @@ import (
 
 // SyncEngine coordinates event ingestion, state updates, and registry reconciliation.
 type SyncEngine struct {
-	logger       zerolog.Logger
-	cfg          *config.AppConfig
-	gen          generator
-	stateTracker *StateTracker
-	reg          upstreamRegistry
+	logger zerolog.Logger
+	cfg    config.AppConfig
+	gen    generator
+	state  state
+	reg    upstreamRegistry
 }
 
-func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, reg upstreamRegistry) *SyncEngine {
+func NewSyncEngine(logger zerolog.Logger, cfg config.AppConfig, gen generator, reg upstreamRegistry, state state) *SyncEngine {
 	return &SyncEngine{
-		logger:       logger,
-		cfg:          cfg,
-		gen:          gen,
-		reg:          reg,
-		stateTracker: NewStateTracker(),
+		logger: logger,
+		cfg:    cfg,
+		gen:    gen,
+		reg:    reg,
+		state:  state,
 	}
 }
 
@@ -43,11 +43,11 @@ func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
 		}
 		// If intents are returned, update the state tracker.
 		if len(intents) > 0 {
-			se.stateTracker.Upsert(evt.Container.Id, evt.Container.Name, evt.Container.Created, intents, "running")
+			se.state.Upsert(evt.Container.Id, evt.Container.Name, evt.Container.Created, intents, "running")
 			se.logger.Info().Msgf("Upserted state for container %s", evt.Container.Id)
 		}
 	case evt.EventType == domain.EventTypeContainerStopped, evt.EventType == domain.EventTypeContainerDied:
-		if removed := se.stateTracker.MarkRemoved(evt.Container.Id); removed {
+		if removed := se.state.MarkRemoved(evt.Container.Id); removed {
 			se.logger.Info().Msgf("Marked container %s as removed", evt.Container.Id)
 		}
 	}
@@ -93,7 +93,7 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 				if err != nil {
 					return fmt.Errorf("Error listing registry records: %w", err)
 				}
-				desired := se.stateTracker.GetAllDesiredRecordIntents()
+				desired := se.state.GetAllDesiredRecordIntents()
 				// Filter out any internally inconsistent intents:
 				desiredReconciled := FilterRecordIntents(desired, se.logger)
 				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, se.logger)

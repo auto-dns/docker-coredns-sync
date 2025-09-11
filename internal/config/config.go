@@ -19,21 +19,11 @@ type Config struct {
 
 // AppConfig holds application-specific configuration.
 type AppConfig struct {
-	RecordTypes       RecordTypesConfig `mapstructure:"record_types"`
-	DockerLabelPrefix string            `mapstructure:"docker_label_prefix"`
-	HostIP            string            `mapstructure:"host_ip"`
-	Hostname          string            `mapstructure:"hostname"`
-	PollInterval      int               `mapstructure:"poll_interval"`
-}
-
-type RecordTypesConfig struct {
-	A     RecordTypeConfig `mapstructure:"a"`
-	AAAA  RecordTypeConfig `mapstructure:"aaaa"`
-	CNAME RecordTypeConfig `mapstructure:"cname"`
-}
-
-type RecordTypeConfig struct {
-	Enabled bool `mapstructure:"enabled"`
+	DockerLabelPrefix string `mapstructure:"docker_label_prefix"`
+	HostIPv4          string `mapstructure:"host_ipv4"`
+	HostIPv6          string `mapstructure:"host_ipv6"`
+	Hostname          string `mapstructure:"hostname"`
+	PollInterval      int    `mapstructure:"poll_interval"`
 }
 
 // EtcdConfig holds etcd-related configuration.
@@ -94,7 +84,8 @@ func initConfig() error {
 	// Set Viper defaults
 	viper.SetDefault("app.allowed_record_types", []string{"A", "CNAME"})
 	viper.SetDefault("app.docker_label_prefix", "coredns")
-	viper.SetDefault("app.host_ip", "127.0.0.1")
+	viper.SetDefault("app.host_ipv4", "")
+	viper.SetDefault("app.host_ipv6", "")
 	viper.SetDefault("app.hostname", "")
 	viper.SetDefault("app.poll_interval", 5)
 	viper.SetDefault("etcd.endpoints", []string{"http://localhost:2379"})
@@ -119,16 +110,11 @@ func (c *Config) validate() error {
 	if c.App.DockerLabelPrefix == "" {
 		return fmt.Errorf("app.docker_label_prefix cannot be empty")
 	}
-
-	if !c.App.RecordTypes.A.Enabled && !c.App.RecordTypes.AAAA.Enabled && !c.App.RecordTypes.CNAME.Enabled {
-		return fmt.Errorf("app.record_types must have at least one record type enabled")
+	if v := c.App.HostIPv4; v != "" && !isValidIPv4(v) {
+		return fmt.Errorf("app.host_ipv4 must be a valid IPv4 address, got: %q", v)
 	}
-
-	if c.App.DockerLabelPrefix == "" {
-		return fmt.Errorf("app.docker_label_prefix cannot be empty")
-	}
-	if net.ParseIP(c.App.HostIP) == nil {
-		return fmt.Errorf("app.host_ip must be a valid IP address")
+	if v := c.App.HostIPv6; v != "" && !isValidIPv6(v) {
+		return fmt.Errorf("app.host_ipv6 must be a valid IPv6 address, got: %q", v)
 	}
 	if c.App.Hostname == "" {
 		return fmt.Errorf("app.hostname cannot be empty")
@@ -163,4 +149,15 @@ func (c *Config) validate() error {
 		return fmt.Errorf("log.level must be a valid log level, got: %s", c.Logging.Level)
 	}
 	return nil
+}
+
+func isValidIPv4(s string) bool {
+	ip := net.ParseIP(strings.TrimSpace(s))
+	return ip != nil && ip.To4() != nil
+}
+
+func isValidIPv6(s string) bool {
+	ip := net.ParseIP(strings.TrimSpace(s))
+	// true IPv6: has a 16-byte form and is not IPv4-mapped (To4()==nil)
+	return ip != nil && ip.To16() != nil && ip.To4() == nil
 }
