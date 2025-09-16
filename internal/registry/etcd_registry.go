@@ -86,7 +86,8 @@ func (er *EtcdRegistry) recordMatches(w etcdRecord, ri *domain.RecordIntent) boo
 	return w.Host == ri.Record.Value &&
 		w.Kind == ri.Record.Kind &&
 		w.OwnerHostname == ri.Hostname &&
-		w.OwnerContainerName == ri.ContainerName
+		w.OwnerContainerName == ri.ContainerName &&
+		(ri.ContainerId == "" || w.OwnerContainerId == ri.ContainerId)
 }
 
 // Remove finds and deletes the etcd key that matches the record domain.
@@ -175,39 +176,29 @@ func (er *EtcdRegistry) List(ctx context.Context) ([]*domain.RecordIntent, error
 	return intents, nil
 }
 
-func (er *EtcdRegistry) rpcCtx(parent context.Context) (context.Context, context.CancelFunc) {
-	if _, ok := parent.Deadline(); ok {
-		return parent, func() {}
-	}
-	return context.WithTimeout(parent, 5*time.Second)
-}
-
 // LockTransaction provides a distributed lock using etcd transactions.
 // It takes keys (as a slice of string), tries to acquire locks on all of them,
 // runs the function, and finally releases all locks.
 func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn func() error) error {
+	// Ensure unique sorted keys.
 	uniq := make(map[string]struct{}, len(keys))
 	for _, k := range keys {
 		uniq[k] = struct{}{}
 	}
-	unique := make([]string, 0, len(uniq))
+	uniqueKeys := make([]string, 0, len(uniq))
 	for k := range uniq {
-		unique = append(unique, k)
+		uniqueKeys = append(uniqueKeys, k)
 	}
-	sort.Strings(unique)
+	sort.Strings(uniqueKeys)
 
-	leases := make([]heldLease, 0, len(unique))
+	leases := make([]heldLease, 0, len(uniqueKeys))
 
-	for _, k := range unique {
-		lockKey := fmt.Sprintf("/locks/%s", k)
-
-		ctxGrant, cancelGrant := er.rpcCtx(ctx)
-		leaseResp, err := er.client.Grant(ctxGrant, int64(er.cfg.LockTTL))
-		cancelGrant()
+	for _, key := range uniqueKeys {
+		lockKey := fmt.Sprintf("/locks/%s", key)
+		leaseResp, err := er.client.Grant(ctx, int64(er.cfg.LockTTL))
 		if err != nil {
-			return fmt.Errorf("lease grant: %w", err)
+			return fmt.Errorf("failed to create lease: %w", err)
 		}
-
 		acquired := false
 		start := time.Now()
 		for time.Since(start) < time.Duration(er.cfg.LockTimeout)*time.Second {
@@ -226,28 +217,49 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 			}
 			if txnResp.Succeeded {
 				acquired = true
-				leases = append(leases, heldLease{lockKey: lockKey, lease: leaseResp.ID})
+
+				// Start keepalive for this lease
+				kaCtx, cancel := context.WithCancel(ctx)
+				kaCh, err := er.client.KeepAlive(kaCtx, leaseResp.ID)
+				if err != nil {
+					cancel()
+					// best-effort cleanup
+					_, _ = er.client.Delete(ctx, lockKey)
+					_, _ = er.client.Revoke(ctx, leaseResp.ID)
+					return fmt.Errorf("keepalive for lock %q: %w", lockKey, err)
+				}
+
+				// Drain keepalive responses until cancel
+				go func() {
+					for range kaCh {
+						// noop; presence keeps the lease alive
+					}
+				}()
+
+				leases = append(leases, heldLease{lockKey: lockKey, lease: leaseResp.ID, cancel: cancel})
 				break
 			}
 			time.Sleep(time.Duration(er.cfg.LockRetryInterval * float64(time.Second)))
 		}
 		if !acquired {
-			return fmt.Errorf("failed to acquire lock on %s", k)
+			if _, e := er.client.Revoke(ctx, leaseResp.ID); e != nil {
+				er.logger.Warn().Err(e).Str("lock", lockKey).Msg("revoke unused lease after acquire timeout")
+			}
+			return fmt.Errorf("failed to acquire lock on %s", key)
 		}
 	}
 
 	err := fn()
 
-	// Release in reverse
+	// Release the locks in reverse order
 	for i := len(leases) - 1; i >= 0; i-- {
 		l := leases[i]
-		_, errDel := er.client.Delete(ctx, l.lockKey)
-		if errDel != nil {
-			er.logger.Warn().Err(errDel).Msgf("failed to delete lock key %s", l.lockKey)
+		l.cancel() // Stop the keepalive first
+		if _, e := er.client.Delete(ctx, l.lockKey); e != nil {
+			er.logger.Warn().Err(e).Msgf("failed to delete lock key %s", l.lockKey)
 		}
-		_, errRevoke := er.client.Revoke(ctx, l.lease)
-		if errRevoke != nil {
-			er.logger.Warn().Err(errRevoke).Msgf("failed to revoke lease for %s", l.lockKey)
+		if _, e := er.client.Revoke(ctx, l.lease); e != nil {
+			er.logger.Warn().Err(e).Msgf("failed to revoke lease for %s", l.lockKey)
 		}
 	}
 	return err
