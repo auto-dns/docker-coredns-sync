@@ -1,0 +1,1584 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>core: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/auto-dns/docker-coredns-sync/internal/core/engine.go (87.0%)</option>
+				
+				<option value="file1">github.com/auto-dns/docker-coredns-sync/internal/core/errors.go (100.0%)</option>
+				
+				<option value="file2">github.com/auto-dns/docker-coredns-sync/internal/core/labels.go (95.8%)</option>
+				
+				<option value="file3">github.com/auto-dns/docker-coredns-sync/internal/core/nested_maps.go (100.0%)</option>
+				
+				<option value="file4">github.com/auto-dns/docker-coredns-sync/internal/core/reconciliation.go (77.7%)</option>
+				
+				<option value="file5">github.com/auto-dns/docker-coredns-sync/internal/core/record_builder.go (97.4%)</option>
+				
+				<option value="file6">github.com/auto-dns/docker-coredns-sync/internal/core/validation.go (95.9%)</option>
+				
+				<option value="file7">github.com/auto-dns/docker-coredns-sync/internal/event/docker_generator.go (90.2%)</option>
+				
+				<option value="file8">github.com/auto-dns/docker-coredns-sync/internal/event/docker_wire.go (100.0%)</option>
+				
+				<option value="file9">github.com/auto-dns/docker-coredns-sync/internal/event/errors.go (100.0%)</option>
+				
+				<option value="file10">github.com/auto-dns/docker-coredns-sync/internal/registry/etcd_path.go (100.0%)</option>
+				
+				<option value="file11">github.com/auto-dns/docker-coredns-sync/internal/registry/etcd_registry.go (91.5%)</option>
+				
+				<option value="file12">github.com/auto-dns/docker-coredns-sync/internal/registry/etcd_wire.go (92.3%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package core
+
+import (
+        "context"
+        "fmt"
+        "time"
+
+        "github.com/auto-dns/docker-coredns-sync/internal/config"
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+        "github.com/rs/zerolog"
+)
+
+// SyncEngine coordinates event ingestion, state updates, and registry reconciliation.
+type SyncEngine struct {
+        logger zerolog.Logger
+        cfg    *config.AppConfig
+        gen    generator
+        state  state
+        reg    upstreamRegistry
+}
+
+func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, reg upstreamRegistry, state state) *SyncEngine <span class="cov8" title="1">{
+        return &amp;SyncEngine{
+                logger: logger,
+                cfg:    cfg,
+                gen:    gen,
+                reg:    reg,
+                state:  state,
+        }
+}</span>
+
+func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) <span class="cov8" title="1">{
+        switch </span>{
+        case evt.Container.Id == "":<span class="cov8" title="1">
+                se.logger.Warn().Str("event_payload", fmt.Sprintf("%+v", evt)).Msg("handled container event with no container id")</span>
+        case !evt.EventType.IsValid():<span class="cov8" title="1">
+                se.logger.Warn().Str("container_id", evt.Container.Id).Str("event_type", string(evt.EventType)).Msg("handled unsupported event type")</span>
+        case evt.EventType == domain.EventTypeInitialContainerDetection, evt.EventType == domain.EventTypeContainerStarted:<span class="cov8" title="1">
+                intents, err := GetContainerRecordIntents(evt, se.cfg, se.logger)
+                if err != nil </span><span class="cov0" title="0">{
+                        se.logger.Error().Err(err).Msg("Error building record intents")
+                        return
+                }</span>
+                // If intents are returned, update the state tracker.
+                <span class="cov8" title="1">if len(intents) &gt; 0 </span><span class="cov8" title="1">{
+                        se.state.Upsert(evt.Container.Id, evt.Container.Name, evt.Container.Created, intents, "running")
+                        se.logger.Info().Msgf("Upserted state for container %s", evt.Container.Id)
+                }</span>
+        case evt.EventType == domain.EventTypeContainerStopped, evt.EventType == domain.EventTypeContainerDied:<span class="cov8" title="1">
+                if removed := se.state.MarkRemoved(evt.Container.Id); removed </span><span class="cov8" title="1">{
+                        se.logger.Info().Msgf("Marked container %s as removed", evt.Container.Id)
+                }</span>
+        }
+}
+
+func (se *SyncEngine) Run(ctx context.Context) error <span class="cov8" title="1">{
+        se.logger.Info().Msg("Starting SyncEngine")
+
+        // Step 1: Subscribe to Docker events
+        eventCh, err := se.gen.Subscribe(ctx)
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("Failed to subscribe to Docker events: %w", err)
+        }</span>
+
+        // Step 2: Launch a goroutine to process incoming events and update the state tracker.
+        <span class="cov8" title="1">se.logger.Info().Msg("Launching event processing goroutine")
+        go func() </span><span class="cov8" title="1">{
+                for </span><span class="cov8" title="1">{
+                        select </span>{
+                        case evt, ok := &lt;-eventCh:<span class="cov8" title="1">
+                                if !ok </span><span class="cov8" title="1">{
+                                        se.logger.Info().Msg("Event channel closed")
+                                        return
+                                }</span>
+                                <span class="cov8" title="1">se.handleEvent(evt)</span>
+                        case &lt;-ctx.Done():<span class="cov8" title="1">
+                                se.logger.Info().Msg("Stopping event processing")
+                                return</span>
+                        }
+                }
+        }()
+
+        // Step 3: Launch the main reconciliation loop.
+        <span class="cov8" title="1">se.logger.Info().Msg("Launching reconciliation loop")
+        ticker := time.NewTicker(time.Duration(se.cfg.PollInterval) * time.Second)
+        defer ticker.Stop()
+        for </span><span class="cov8" title="1">{
+                select </span>{
+                case &lt;-ticker.C:<span class="cov8" title="1">
+                        se.logger.Debug().Msg("Reconciliation loop tick")
+                        err := se.reg.LockTransaction(ctx, []string{"__global__"}, func() error </span><span class="cov8" title="1">{
+                                actual, err := se.reg.List(ctx)
+                                if err != nil </span><span class="cov0" title="0">{
+                                        return fmt.Errorf("Error listing registry records: %w", err)
+                                }</span>
+                                <span class="cov8" title="1">desired := se.state.GetAllDesiredRecordIntents()
+                                // Filter out any internally inconsistent intents:
+                                desiredReconciled := FilterRecordIntents(desired, se.logger)
+                                toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, se.logger)
+                                for _, rec := range toRemove </span><span class="cov8" title="1">{
+                                        if err := se.reg.Remove(ctx, rec); err != nil </span><span class="cov0" title="0">{
+                                                se.logger.Error().Err(err).Msg("Error removing record")
+                                        }</span>
+                                }
+                                <span class="cov8" title="1">for _, rec := range toAdd </span><span class="cov8" title="1">{
+                                        if err := se.reg.Register(ctx, rec); err != nil </span><span class="cov0" title="0">{
+                                                se.logger.Error().Err(err).Msg("Error registering record")
+                                        }</span>
+                                }
+                                <span class="cov8" title="1">return nil</span>
+                        })
+                        <span class="cov8" title="1">if err != nil </span><span class="cov0" title="0">{
+                                se.logger.Error().Err(err).Msg("Sync error")
+                        }</span>
+                case &lt;-ctx.Done():<span class="cov8" title="1">
+                        se.logger.Info().Msg("SyncEngine shutting down")
+                        err := se.reg.Close()
+                        if err != nil </span><span class="cov0" title="0">{
+                                se.logger.Error().Err(err).Msg("Error closing registry")
+                        }</span>
+                        <span class="cov8" title="1">return ctx.Err()</span>
+                }
+        }
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package core
+
+// RecordValidationError represents an error that occurs during DNS record validation
+type RecordValidationError struct {
+        Message string
+}
+
+// Error implements the error interface
+func (e *RecordValidationError) Error() string <span class="cov8" title="1">{
+        return e.Message
+}</span>
+
+// NewRecordValidationError creates a new RecordValidationError
+func NewRecordValidationError(message string) *RecordValidationError <span class="cov8" title="1">{
+        return &amp;RecordValidationError{Message: message}
+}</span>
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package core
+
+import (
+        "fmt"
+        "strings"
+
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+)
+
+type LabeledRecord struct {
+        prefix string
+        Kind   domain.RecordKind // A, AAAA, CNAME
+        Name   string
+        Value  string // may be empty for A (defaults)
+        Alias  string // optional
+        Force  *bool  // Force is tri-state: nil = not specified on the record label, non-nil = explicit value
+}
+
+func (lr LabeledRecord) GetNameLabel() string <span class="cov8" title="1">{
+        if lr.Alias == "" </span><span class="cov8" title="1">{
+                return fmt.Sprintf("%s.%s.name", lr.prefix, lr.Kind)
+        }</span> else<span class="cov8" title="1"> {
+                return fmt.Sprintf("%s.%s.%s.name", lr.prefix, lr.Kind, lr.Alias)
+        }</span>
+}
+
+func (lr LabeledRecord) GetValueLabel() string <span class="cov8" title="1">{
+        if lr.Alias == "" </span><span class="cov8" title="1">{
+                return fmt.Sprintf("%s.%s.value", lr.prefix, lr.Kind)
+        }</span> else<span class="cov8" title="1"> {
+                return fmt.Sprintf("%s.%s.%s.value", lr.prefix, lr.Kind, lr.Alias)
+        }</span>
+}
+
+type ParsedLabels struct {
+        Enabled        bool
+        ContainerForce bool
+        Records        []LabeledRecord
+}
+
+func ParseLabels(prefix string, labels map[string]string) ParsedLabels <span class="cov8" title="1">{
+        pl := ParsedLabels{}
+
+        // container-level flags
+        // -- See if the container is enabled for this app
+        if strings.ToLower(labels[prefix+".enabled"]) == "true" </span><span class="cov8" title="1">{
+                pl.Enabled = true
+        }</span>
+        // -- See if the container is configured to force override
+        <span class="cov8" title="1">if v, ok := labels[prefix+".force"]; ok </span><span class="cov8" title="1">{
+                b := strings.ToLower(v) == "true"
+                pl.ContainerForce = b
+        }</span>
+
+        // aggregate by (kind|alias)
+        <span class="cov8" title="1">type aggregation struct {
+                kind  domain.RecordKind
+                alias string
+                name  string
+                value string
+                force *bool
+        }
+
+        aggregations := map[string]*aggregation{}
+
+        // Loop over remaining labels
+        for k, v := range labels </span><span class="cov8" title="1">{
+                // Skip labels not in scope for this app
+                if !strings.HasPrefix(k, prefix+".") </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">parts := strings.Split(k, ".") // coredns.&lt;TYPE&gt;[.&lt;alias&gt;].(name|value|force)
+                if len(parts) &lt; 3 </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">rawKind := parts[1]
+                kind, err := domain.ParseKind(rawKind)
+                if err != nil </span><span class="cov8" title="1">{
+                        // unknown record kind; skip
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">alias := ""
+                keyIdx := 2
+                if len(parts) &gt;= 4 </span><span class="cov8" title="1">{
+                        alias = parts[2]
+                        keyIdx = 3
+                }</span>
+                <span class="cov8" title="1">if keyIdx &gt;= len(parts) </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">field := parts[keyIdx]
+                if field != "name" &amp;&amp; field != "value" &amp;&amp; field != "force" </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">labeledRecordKey := string(kind) + "|" + alias
+                a, ok := aggregations[labeledRecordKey]
+                if !ok </span><span class="cov8" title="1">{
+                        a = &amp;aggregation{kind: kind, alias: alias}
+                        aggregations[labeledRecordKey] = a
+                }</span>
+
+                <span class="cov8" title="1">switch field </span>{
+                case "name":<span class="cov8" title="1">
+                        a.name = strings.TrimSpace(v)</span>
+                case "value":<span class="cov8" title="1">
+                        a.value = strings.TrimSpace(v)</span>
+                case "force":<span class="cov8" title="1">
+                        force := boolFromLabel(v)
+                        a.force = &amp;force</span>
+                }
+        }
+
+        // flatten to []LabeledRecord
+        <span class="cov8" title="1">for _, a := range aggregations </span><span class="cov8" title="1">{
+                pl.Records = append(pl.Records, LabeledRecord{
+                        prefix: prefix,
+                        Kind:   a.kind,
+                        Name:   a.name,
+                        Value:  a.value, // may be empty; caller decides fallback (e.g., host IP for A)
+                        Alias:  a.alias,
+                        Force:  a.force,
+                })
+        }</span>
+
+        <span class="cov8" title="1">return pl</span>
+}
+
+func boolFromLabel(v string) bool <span class="cov8" title="1">{ return strings.EqualFold(strings.TrimSpace(v), "true") }</span>
+</pre>
+		
+		<pre class="file" id="file3" style="display: none">package core
+
+import (
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+        "github.com/auto-dns/docker-coredns-sync/internal/util"
+)
+
+// Define struct types
+type nestedRecordMap struct {
+        *util.DefaultMap[string, *kindMap]
+}
+
+type kindMap struct {
+        *util.DefaultMap[domain.RecordKind, *recordMap]
+}
+
+type recordMap struct {
+        *util.DefaultMap[string, *domain.RecordIntent]
+}
+
+// Create constructor functions
+func newNestedRecordMap() *nestedRecordMap <span class="cov8" title="1">{
+        return &amp;nestedRecordMap{
+                DefaultMap: util.NewDefaultMap[string](func() *kindMap </span><span class="cov8" title="1">{
+                        return newkindMap()
+                }</span>),
+        }
+}
+
+func newkindMap() *kindMap <span class="cov8" title="1">{
+        return &amp;kindMap{
+                DefaultMap: util.NewDefaultMap[domain.RecordKind](func() *recordMap </span><span class="cov8" title="1">{
+                        return newRecordMap()
+                }</span>),
+        }
+}
+
+func newRecordMap() *recordMap <span class="cov8" title="1">{
+        return &amp;recordMap{
+                DefaultMap: util.NewDefaultMap[string](func() *domain.RecordIntent </span><span class="cov8" title="1">{
+                        return nil
+                }</span>),
+        }
+}
+
+// By nothing
+func (m nestedRecordMap) GetAllValues() []*domain.RecordIntent <span class="cov8" title="1">{
+        values := make([]*domain.RecordIntent, 0)
+        for _, kindMap := range m.Values() </span><span class="cov8" title="1">{
+                for _, recordMap := range kindMap.Values() </span><span class="cov8" title="1">{
+                        for _, recordIntent := range recordMap.Values() </span><span class="cov8" title="1">{
+                                values = append(values, recordIntent)
+                        }</span>
+                }
+        }
+        <span class="cov8" title="1">return values</span>
+}
+
+func (m nestedRecordMap) GetAllNames() []string <span class="cov8" title="1">{
+        names := make([]string, 0)
+        for _, key := range m.Keys() </span><span class="cov8" title="1">{
+                names = append(names, key)
+        }</span>
+        <span class="cov8" title="1">return names</span>
+}
+
+// By name
+
+// By name and kind
+func (m nestedRecordMap) PeekNameKindRecords(name string, kind domain.RecordKind) ([]*domain.RecordIntent, bool) <span class="cov8" title="1">{
+        if kindMap, exists := m.Peek(name); exists </span><span class="cov8" title="1">{
+                if recordMap, exists := kindMap.Peek(kind); exists </span><span class="cov8" title="1">{
+                        return recordMap.Values(), true
+                }</span>
+                <span class="cov8" title="1">return []*domain.RecordIntent{}, false</span>
+        }
+        <span class="cov8" title="1">return []*domain.RecordIntent{}, false</span>
+}
+
+// DeleteNameKind removes all records of a specific kind for a name
+func (m nestedRecordMap) DeleteNameKind(name string, kind domain.RecordKind) <span class="cov8" title="1">{
+        if domainMap, exists := m.Peek(name); exists </span><span class="cov8" title="1">{
+                domainMap.Delete(kind)
+        }</span>
+}
+
+// By name, kind, and value
+func (m *nestedRecordMap) GetNameKindRecord(name string, kind domain.RecordKind, value string) *domain.RecordIntent <span class="cov8" title="1">{
+        return m.Get(name).Get(kind).Get(value)
+}</span>
+
+func (m *nestedRecordMap) PeekNameKindRecord(name string, kind domain.RecordKind, value string) (*domain.RecordIntent, bool) <span class="cov8" title="1">{
+        kindMap, exists := m.Peek(name)
+        if !exists </span><span class="cov8" title="1">{
+                return nil, false
+        }</span>
+
+        <span class="cov8" title="1">recordMap, exists := kindMap.Peek(kind)
+        if !exists </span><span class="cov8" title="1">{
+                return nil, false
+        }</span>
+
+        <span class="cov8" title="1">recordIntent, exists := recordMap.Peek(value)
+        return recordIntent, exists</span>
+}
+</pre>
+		
+		<pre class="file" id="file4" style="display: none">package core
+
+import (
+        "github.com/auto-dns/docker-coredns-sync/internal/config"
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+
+        "github.com/rs/zerolog"
+)
+
+func shouldReplaceExisting(new, existing *domain.RecordIntent, logger zerolog.Logger) bool <span class="cov8" title="1">{
+        l := logger.With().Str("reconciler", "filter").Str("new_record", new.Render()).Str("existing_record", existing.Render()).Logger()
+        if new.Force &amp;&amp; !existing.Force </span><span class="cov8" title="1">{
+                l.Trace().Msg("Replacing existing record due to force label on new record")
+                return true
+        }</span> else<span class="cov8" title="1"> if !new.Force &amp;&amp; existing.Force </span><span class="cov8" title="1">{
+                l.Trace().Msg("Keeping existing record due to force label on existing record")
+                return false
+        }</span> else<span class="cov8" title="1"> if new.Created.Before(existing.Created) </span><span class="cov8" title="1">{
+                l.Trace().Msg("Replacing existing record due to the new record's container being older")
+                return true
+        }</span>
+        <span class="cov8" title="1">l.Trace().Msg("Keeping existing record due to the existing record's container being older")
+        return false</span>
+}
+
+func shouldReplaceAllExisting(new *domain.RecordIntent, existing []*domain.RecordIntent, logger zerolog.Logger) bool <span class="cov8" title="1">{
+        // Returns True if `new` (CNAME) should replace all `existing` (A and AAAA records).
+
+        // Rules:
+        // - If any existing is force and new is not, new loses.
+        // - If new is force and all existing are not, new wins.
+        // - If mixed force values exist and new is force:
+        //     - New must be older than *all* existing force records.
+        //     - Otherwise, new loses.
+        // - If force flags match for all (either all force or all non-force), the oldest record wins.
+        existingRecordStrings := make([]string, 0, len(existing))
+        for _, ri := range existing </span><span class="cov8" title="1">{
+                existingRecordStrings = append(existingRecordStrings, ri.Render())
+        }</span>
+        <span class="cov8" title="1">l := logger.With().Str("reconciler", "filter").Str("new_record", new.Render()).Strs("existing_records", existingRecordStrings).Logger()
+        if len(existing) == 0 </span><span class="cov8" title="1">{
+                return true
+        }</span>
+
+        <span class="cov8" title="1">anyForce := false
+        allForce := true
+        allNonForce := true
+        newCreatedBeforeAllOldWithForce := true
+        newCreatedBeforeAll := true
+        for _, ri := range existing </span><span class="cov8" title="1">{
+                newCreatedBeforeExisting := new.Created.Before(ri.Created)
+                if ri.Force </span><span class="cov8" title="1">{
+                        anyForce = true
+                        allNonForce = false
+                        if !newCreatedBeforeExisting </span><span class="cov8" title="1">{
+                                newCreatedBeforeAllOldWithForce = false
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        allForce = false
+                }</span>
+                <span class="cov8" title="1">if !newCreatedBeforeExisting </span><span class="cov8" title="1">{
+                        newCreatedBeforeAll = false
+                }</span>
+        }
+
+        // If any existing is force and new is not, new loses.
+        <span class="cov8" title="1">if anyForce &amp;&amp; !new.Force </span><span class="cov8" title="1">{
+                l.Trace().Msg("Keeping all existing records because one of their containers has the force label and the new record's container does not")
+                return false
+        }</span>
+
+        // If new is force and all existing are not, new wins.
+        <span class="cov8" title="1">if new.Force &amp;&amp; allNonForce </span><span class="cov8" title="1">{
+                l.Trace().Msg("Replacing all existing records with the new one because none of the existing record's containers has the force label and the new record's container does")
+                return true
+        }</span>
+
+        // If mixed force values exist and new is force:
+        // New must be older than all existing force records.
+        <span class="cov8" title="1">if new.Force &amp;&amp; !allForce </span><span class="cov8" title="1">{
+                if newCreatedBeforeAllOldWithForce </span><span class="cov0" title="0">{
+                        l.Trace().Msg("Replacing all existing new records with the new one because the new record's container has the force label and was created before all of the existing records' containers that have the force label")
+                        return true
+                }</span>
+                <span class="cov8" title="1">l.Trace().Msg("Keeping all existing new records - although the new one's container has the force label, one or more of the existing records' containers with the force label was created before it")
+                return false</span>
+        }
+
+        // Otherwise, when force flags match (either all true or all false), the oldest wins.
+        <span class="cov8" title="1">if newCreatedBeforeAll </span><span class="cov8" title="1">{
+                l.Trace().Msg("Replacing all existing records with the new one because none of the containers have the force label and the new record's container is older than the containers of all the existing records")
+                return true
+        }</span>
+        <span class="cov8" title="1">l.Trace().Msg("Keeping all existing records because none of the containers have the force label and the new record's container is not older than the containers of all the existing records")
+        return false</span>
+}
+
+// FilterRecordIntents receives a slice of RecordIntent (desired) and filters out conflicting ones.
+// It returns a reconciled slice of RecordIntent.
+func FilterRecordIntents(recordIntents []*domain.RecordIntent, logger zerolog.Logger) []*domain.RecordIntent <span class="cov8" title="1">{
+        logger.Debug().Msg("Reconciling desired records against each other")
+
+        desiredByNameKind := newNestedRecordMap()
+
+        // 1. Deduplicate per name+kind using shouldReplaceExisting
+        for _, ri := range recordIntents </span><span class="cov8" title="1">{
+                switch </span>{
+                case ri.Record.IsA():<span class="cov8" title="1">
+                        if existing, dup := desiredByNameKind.PeekNameKindRecord(ri.Record.Name, domain.RecordA, ri.Record.Value); !dup || shouldReplaceExisting(ri, existing, logger) </span><span class="cov8" title="1">{
+                                desiredByNameKind.Get(ri.Record.Name).Get(domain.RecordA).Set(ri.Record.Value, ri)
+                        }</span>
+                case ri.Record.IsAAAA():<span class="cov8" title="1">
+                        if existing, dup := desiredByNameKind.PeekNameKindRecord(ri.Record.Name, domain.RecordAAAA, ri.Record.Value); !dup || shouldReplaceExisting(ri, existing, logger) </span><span class="cov8" title="1">{
+                                desiredByNameKind.Get(ri.Record.Name).Get(domain.RecordAAAA).Set(ri.Record.Value, ri)
+                        }</span>
+                case ri.Record.IsCNAME():<span class="cov8" title="1">
+                        if cnames, exists := desiredByNameKind.PeekNameKindRecords(ri.Record.Name, domain.RecordCNAME); exists </span><span class="cov8" title="1">{
+                                // Get existing CNAME record - assume only one
+                                existing := cnames[0]
+                                if shouldReplaceExisting(ri, existing, logger) </span><span class="cov8" title="1">{
+                                        desiredByNameKind.Get(ri.Record.Name).Get(domain.RecordCNAME).Delete(existing.Record.Value)
+                                        desiredByNameKind.Get(ri.Record.Name).Get(domain.RecordCNAME).Set(ri.Record.Value, ri)
+                                }</span>
+                        } else<span class="cov8" title="1"> {
+                                // No conflict - just add it
+                                desiredByNameKind.Get(ri.Record.Name).Get(domain.RecordCNAME).Set(ri.Record.Value, ri)
+                        }</span>
+                }
+        }
+
+        // 2. Resolve CNAME vs A/AAAA conflict per name
+        <span class="cov8" title="1">desiredByNameKindDeduplicated := newNestedRecordMap()
+        for _, name := range desiredByNameKind.GetAllNames() </span><span class="cov8" title="1">{
+                aRecs, hasA := desiredByNameKind.PeekNameKindRecords(name, domain.RecordA)
+                aaaaRecs, hasAAAA := desiredByNameKind.PeekNameKindRecords(name, domain.RecordAAAA)
+                cnameRecs, hasCNAME := desiredByNameKind.PeekNameKindRecords(name, domain.RecordCNAME)
+
+                switch </span>{
+                case hasCNAME &amp;&amp; !(hasA || hasAAAA):<span class="cov8" title="1">
+                        // Keep the single CNAME
+                        ri := cnameRecs[0]
+                        desiredByNameKindDeduplicated.Get(name).Get(domain.RecordCNAME).Set(ri.Record.Value, ri)</span>
+
+                case (hasA || hasAAAA) &amp;&amp; !hasCNAME:<span class="cov8" title="1">
+                        for _, ri := range aRecs </span><span class="cov8" title="1">{
+                                desiredByNameKindDeduplicated.Get(name).Get(domain.RecordA).Set(ri.Record.Value, ri)
+                        }</span>
+                        <span class="cov8" title="1">for _, ri := range aaaaRecs </span><span class="cov8" title="1">{
+                                desiredByNameKindDeduplicated.Get(name).Get(domain.RecordAAAA).Set(ri.Record.Value, ri)
+                        }</span>
+
+                case hasCNAME &amp;&amp; (hasA || hasAAAA):<span class="cov8" title="1">
+                        cnameRecord := cnameRecs[0]
+                        allAddr, _ := addrRecords(desiredByNameKind, name)
+
+                        if shouldReplaceAllExisting(cnameRecord, allAddr, logger) </span><span class="cov8" title="1">{
+                                desiredByNameKindDeduplicated.Get(name).Get(domain.RecordCNAME).Set(cnameRecord.Record.Value, cnameRecord)
+                        }</span> else<span class="cov8" title="1"> {
+                                for _, ri := range aRecs </span><span class="cov8" title="1">{
+                                        desiredByNameKindDeduplicated.Get(name).Get(domain.RecordA).Set(ri.Record.Value, ri)
+                                }</span>
+                                <span class="cov8" title="1">for _, ri := range aaaaRecs </span><span class="cov0" title="0">{
+                                        desiredByNameKindDeduplicated.Get(name).Get(domain.RecordAAAA).Set(ri.Record.Value, ri)
+                                }</span>
+                        }
+
+                default:<span class="cov0" title="0">
+                        logger.Warn().Str("name", name).Msg("Found a record name with no supported record kind. Skipping.")</span>
+                }
+        }
+
+        <span class="cov8" title="1">return desiredByNameKindDeduplicated.GetAllValues()</span>
+}
+
+func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.AppConfig, logger zerolog.Logger) ([]*domain.RecordIntent, []*domain.RecordIntent) <span class="cov8" title="1">{
+        toAddMap := map[string]*domain.RecordIntent{}
+        toRemoveMap := map[string]*domain.RecordIntent{}
+
+        actualByNameKind := newNestedRecordMap()
+        desiredSet := make(map[string]struct{}, len(desired))
+        for _, ri := range desired </span><span class="cov8" title="1">{
+                desiredSet[ri.Key()] = struct{}{}
+        }</span>
+
+        // Step 1: Remove stale records and build lookup structure
+        <span class="cov8" title="1">for _, ri := range actual </span><span class="cov8" title="1">{
+                if _, exists := desiredSet[ri.Key()]; !exists </span><span class="cov8" title="1">{
+                        if ri.Hostname == cfg.Hostname </span><span class="cov8" title="1">{
+                                logger.Info().Msgf("Removing stale record: %s (owned by %s/%s)", ri.Record.Render(), ri.Hostname, ri.ContainerName)
+                                toRemoveMap[ri.Key()] = ri
+                        }</span> else<span class="cov8" title="1"> {
+                                logger.Debug().Msgf("Skipping removal of record %s not owned by this host (%s != %s)", ri.Record.Render(), ri.Hostname, cfg.Hostname)
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        actualByNameKind.Get(ri.Record.Name).Get(ri.Record.Kind).Set(ri.Record.Value, ri)
+                }</span>
+        }
+
+        // Step 2: Reconcile each desired record
+        <span class="cov8" title="1">for _, d := range desired </span><span class="cov8" title="1">{
+                evictions := map[string]*domain.RecordIntent{}
+
+                switch </span>{
+                case d.Record.IsA():<span class="cov8" title="1">
+                        // A vs CNAME
+                        if cnames, ok := actualByNameKind.PeekNameKindRecords(d.Record.Name, domain.RecordCNAME); ok </span><span class="cov0" title="0">{
+                                existing := cnames[0]
+                                if d.Force || d.Created.Before(existing.Created) </span><span class="cov0" title="0">{
+                                        for _, r := range cnames </span><span class="cov0" title="0">{
+                                                evictions[r.Key()] = r
+                                        }</span>
+                                        <span class="cov0" title="0">logger.Warn().Strs("actual", renderAll(cnames)).Str("desired", d.Render()).Bool("force_eviction", d.Force).Bool("age_eviction", d.Created.Before(existing.Created)).Msg("A vs CNAME - evicting CNAME")</span>
+                                } else<span class="cov0" title="0"> {
+                                        continue</span>
+                                }
+                        } else<span class="cov8" title="1"> if r, ok := actualByNameKind.PeekNameKindRecord(d.Record.Name, domain.RecordA, d.Record.Value); ok </span><span class="cov8" title="1">{
+                                // Same A exists - replace only if d wins
+                                if r.Equal(*d) </span><span class="cov8" title="1">{
+                                        continue</span>
+                                } else<span class="cov0" title="0"> if d.Force || d.Created.Before(r.Created) </span><span class="cov0" title="0">{
+                                        logger.Warn().Str("actual_record_intent", r.Render()).Str("desired", d.Render()).Bool("force_eviction", d.Force).Bool("age_eviction", d.Created.Before(r.Created)).Msg("A vs A - evicting A")
+                                        evictions[r.Key()] = r
+                                }</span> else<span class="cov0" title="0"> {
+                                        continue</span>
+                                }
+                        }
+
+                case d.Record.IsAAAA():<span class="cov8" title="1">
+                        if cnames, ok := actualByNameKind.PeekNameKindRecords(d.Record.Name, domain.RecordCNAME); ok </span><span class="cov0" title="0">{
+                                existing := cnames[0]
+                                if d.Force || d.Created.Before(existing.Created) </span><span class="cov0" title="0">{
+                                        for _, r := range cnames </span><span class="cov0" title="0">{
+                                                evictions[r.Key()] = r
+                                        }</span>
+                                        <span class="cov0" title="0">logger.Warn().Strs("actual", renderAll(cnames)).Str("desired", d.Render()).Bool("force_eviction", d.Force).Bool("age_eviction", d.Created.Before(existing.Created)).Msg("AAAA vs CNAME - evicting CNAME")</span>
+                                } else<span class="cov0" title="0"> {
+                                        continue</span>
+                                }
+                        } else<span class="cov8" title="1"> if r, ok := actualByNameKind.PeekNameKindRecord(d.Record.Name, domain.RecordAAAA, d.Record.Value); ok </span><span class="cov8" title="1">{
+                                // Same AAAA exists — replace only if d wins
+                                if r.Equal(*d) </span><span class="cov8" title="1">{
+                                        continue</span>
+                                } else<span class="cov0" title="0"> if d.Force || d.Created.Before(r.Created) </span><span class="cov0" title="0">{
+                                        logger.Warn().Str("actual_record_intent", r.Render()).Str("desired", d.Render()).Bool("force_eviction", d.Force).Bool("age_eviction", d.Created.Before(r.Created)).Msg("AAAA vs AAAA - evicting AAAA")
+                                        evictions[r.Key()] = r
+                                }</span> else<span class="cov0" title="0"> {
+                                        continue</span>
+                                }
+                        }
+
+                case d.Record.IsCNAME():<span class="cov8" title="1">
+                        // CNAME vs A/AAAA
+                        if allAddr, hasAddr := addrRecords(actualByNameKind, d.Record.Name); hasAddr </span><span class="cov0" title="0">{
+                                olderThanAll := true
+                                for _, r := range allAddr </span><span class="cov0" title="0">{
+                                        if !d.Created.Before(r.Created) </span><span class="cov0" title="0">{
+                                                olderThanAll = false
+                                                break</span>
+                                        }
+                                }
+
+                                <span class="cov0" title="0">if d.Force || olderThanAll </span><span class="cov0" title="0">{
+                                        for _, r := range allAddr </span><span class="cov0" title="0">{
+                                                evictions[r.Key()] = r
+                                        }</span>
+                                        <span class="cov0" title="0">logger.Warn().Strs("actual", renderAll(allAddr)).Str("desired", d.Render()).Bool("force_eviction", d.Force).Bool("age_eviction", olderThanAll).Msg("CNAME vs A/AAAA — evicting address records")</span>
+                                } else<span class="cov0" title="0"> {
+                                        continue</span>
+                                }
+                        } else<span class="cov8" title="1"> if cnames, ok := actualByNameKind.PeekNameKindRecords(d.Record.Name, domain.RecordCNAME); ok </span><span class="cov8" title="1">{
+                                existing := cnames[0]
+                                if existing.Equal(*d) </span><span class="cov8" title="1">{
+                                        continue</span>
+                                }
+                                <span class="cov0" title="0">if d.Force || d.Created.Before(existing.Created) </span><span class="cov0" title="0">{
+                                        for _, r := range cnames </span><span class="cov0" title="0">{
+                                                evictions[r.Key()] = r
+                                        }</span>
+                                        <span class="cov0" title="0">logger.Warn().Strs("actual", renderAll(cnames)).Str("desired", d.Render()).Bool("force_eviction", d.Force).Bool("age_eviction", d.Created.Before(existing.Created)).Msg("Local vs remote - evicting remote")</span>
+                                } else<span class="cov0" title="0"> {
+                                        continue</span>
+                                }
+                        }
+
+                default:<span class="cov0" title="0"></span>
+                        // Don't skip - just add with no evictions - no need for an else statement, this will just work
+                }
+
+                // Step 3: Simulate state for validation
+                <span class="cov8" title="1">keysToRemove := map[string]struct{}{}
+                for k := range toRemoveMap </span><span class="cov8" title="1">{
+                        keysToRemove[k] = struct{}{}
+                }</span>
+                <span class="cov8" title="1">for key := range evictions </span><span class="cov0" title="0">{
+                        keysToRemove[key] = struct{}{}
+                }</span>
+
+                <span class="cov8" title="1">var simulated []*domain.RecordIntent
+                for _, r := range actual </span><span class="cov8" title="1">{
+                        if _, skip := keysToRemove[r.Key()]; !skip </span><span class="cov8" title="1">{
+                                simulated = append(simulated, r)
+                        }</span>
+                }
+
+                <span class="cov8" title="1">if err := ValidateRecord(d, simulated, logger); err == nil </span><span class="cov8" title="1">{
+                        logger.Info().Str("record", d.Render()).Msg("Adding new record")
+                        toAddMap[d.Record.Key()] = d
+                        for k, v := range evictions </span><span class="cov0" title="0">{
+                                toRemoveMap[k] = v
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        logger.Warn().Err(err).Str("record", d.Record.Render()).Msg("Skipping invalid record")
+                }</span>
+        }
+
+        // Step 5: Convert maps to slices
+        <span class="cov8" title="1">toAdd := make([]*domain.RecordIntent, 0, len(toAddMap))
+        toRemove := make([]*domain.RecordIntent, 0, len(toRemoveMap))
+        for _, r := range toAddMap </span><span class="cov8" title="1">{
+                toAdd = append(toAdd, r)
+        }</span>
+        <span class="cov8" title="1">for _, r := range toRemoveMap </span><span class="cov8" title="1">{
+                toRemove = append(toRemove, r)
+        }</span>
+        <span class="cov8" title="1">return toAdd, toRemove</span>
+}
+
+func addrRecords(m *nestedRecordMap, name string) ([]*domain.RecordIntent, bool) <span class="cov8" title="1">{
+        a, hasA := m.PeekNameKindRecords(name, domain.RecordA)
+        aaaa, hasAAAA := m.PeekNameKindRecords(name, domain.RecordAAAA)
+        if !hasA &amp;&amp; !hasAAAA </span><span class="cov8" title="1">{
+                return nil, false
+        }</span>
+        <span class="cov8" title="1">out := make([]*domain.RecordIntent, 0, len(a)+len(aaaa))
+        out = append(out, a...)
+        out = append(out, aaaa...)
+        return out, true</span>
+}
+
+func renderAll(rs []*domain.RecordIntent) []string <span class="cov8" title="1">{
+        out := make([]string, len(rs))
+        for i, r := range rs </span><span class="cov8" title="1">{
+                out[i] = r.Render()
+        }</span>
+        <span class="cov8" title="1">return out</span>
+}
+</pre>
+		
+		<pre class="file" id="file5" style="display: none">package core
+
+import (
+        "strings"
+
+        "github.com/auto-dns/docker-coredns-sync/internal/config"
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+        "github.com/rs/zerolog"
+)
+
+// GetContainerRecordIntents parses the container event's labels and returns record intents.
+func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfig, logger zerolog.Logger) ([]*domain.RecordIntent, error) <span class="cov8" title="1">{
+        var intents []*domain.RecordIntent
+
+        prefix := cfg.DockerLabelPrefix
+        parsedLabels := ParseLabels(prefix, event.Container.Labels)
+
+        if !parsedLabels.Enabled </span><span class="cov8" title="1">{
+                logger.Debug().Msg("Record generation not enabled for container")
+                return intents, nil
+        }</span>
+
+        <span class="cov8" title="1">for _, labeledRecord := range parsedLabels.Records </span><span class="cov8" title="1">{
+                // Handle empty name
+                // -- Skip
+                if strings.TrimSpace(labeledRecord.Name) == "" </span><span class="cov8" title="1">{
+                        logger.Warn().Str("kind", string(labeledRecord.Kind)).Msg("skipping record with no name")
+                        continue</span>
+                }
+
+                // Handle empty value
+                // -- For A and AAAA, use config value for default
+                <span class="cov8" title="1">value := strings.TrimSpace(labeledRecord.Value)
+                if value == "" </span><span class="cov8" title="1">{
+                        nameLabel := labeledRecord.GetNameLabel()
+                        valueLabel := labeledRecord.GetValueLabel()
+                        switch labeledRecord.Kind </span>{
+                        case domain.RecordA:<span class="cov8" title="1">
+                                value = cfg.HostIPv4
+                                if value == "" </span><span class="cov8" title="1">{
+                                        logger.Warn().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. No default value configured. Skipping.", nameLabel, valueLabel)
+                                        continue</span>
+                                } else<span class="cov8" title="1"> {
+                                        logger.Debug().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. Using host IP %s", nameLabel, valueLabel, value)
+                                }</span>
+                        case domain.RecordAAAA:<span class="cov8" title="1">
+                                value = cfg.HostIPv6
+                                if value == "" </span><span class="cov8" title="1">{
+                                        logger.Warn().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. No default value configured. Skipping.", nameLabel, valueLabel)
+                                        continue</span>
+                                } else<span class="cov8" title="1"> {
+                                        logger.Debug().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. Using host IP %s", nameLabel, valueLabel, value)
+                                }</span>
+                        case domain.RecordCNAME:<span class="cov8" title="1">
+                                logger.Warn().Str("name", labeledRecord.Name).Msgf("%s label found with no matching %s. Skipping.", nameLabel, valueLabel)
+                                continue</span>
+                        default:<span class="cov0" title="0">
+                                logger.Warn().Str("kind", string(labeledRecord.Kind)).Msg("unsupported record kind")</span>
+                        }
+                }
+
+                <span class="cov8" title="1">rec, err := domain.NewFromKind(labeledRecord.Kind, labeledRecord.Name, value)
+                if err != nil </span><span class="cov8" title="1">{
+                        logger.Warn().Err(err).Str("kind", string(labeledRecord.Kind)).Str("name", labeledRecord.Name).Str("value", value).Msg("invalid record")
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">force := parsedLabels.ContainerForce
+                if labeledRecord.Force != nil </span><span class="cov8" title="1">{
+                        force = *labeledRecord.Force
+                }</span>
+
+                <span class="cov8" title="1">intent := &amp;domain.RecordIntent{
+                        ContainerId:   event.Container.Id,
+                        ContainerName: event.Container.Name,
+                        Created:       event.Container.Created,
+                        Hostname:      cfg.Hostname,
+                        Force:         force,
+                        Record:        rec,
+                }
+                intents = append(intents, intent)</span>
+        }
+
+        <span class="cov8" title="1">return intents, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file6" style="display: none">package core
+
+import (
+        "fmt"
+
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+        "github.com/rs/zerolog"
+)
+
+func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent, logger zerolog.Logger) error <span class="cov8" title="1">{
+        // Validates a proposed DNS record against the current known records.
+
+        // Rules enforced:
+        // 1. A/AAAA and CNAME records may not coexist for the same name.
+        // 2. No duplicate CNAMEs.
+        // 3. A/AAAA records with the same address are disallowed for the same name+family.
+        // 4. CNAMEs may not form resolution cycles.
+        newR := newRI.Record
+
+        // presence flags + duplicate checks per family
+        var sameNameCNAME bool
+        var sameNameAnyAddress bool
+        var dupAValue, dupAAAAValue bool
+
+        for _, ri := range existing </span><span class="cov8" title="1">{
+                r := ri.Record
+                sameName := r.Name == newR.Name
+                sameValue := r.Value == newR.Value
+                switch </span>{
+                case r.IsA():<span class="cov8" title="1">
+                        if sameName </span><span class="cov8" title="1">{
+                                sameNameAnyAddress = true
+                        }</span>
+                        <span class="cov8" title="1">if sameName &amp;&amp; sameValue &amp;&amp; newR.IsA() </span><span class="cov8" title="1">{
+                                dupAValue = true
+                        }</span>
+                case r.IsAAAA():<span class="cov8" title="1">
+                        if sameName </span><span class="cov8" title="1">{
+                                sameNameAnyAddress = true
+                        }</span>
+                        <span class="cov8" title="1">if sameName &amp;&amp; sameValue &amp;&amp; newR.IsAAAA() </span><span class="cov8" title="1">{
+                                dupAAAAValue = true
+                        }</span>
+                case r.IsCNAME():<span class="cov8" title="1">
+                        if sameName </span><span class="cov8" title="1">{
+                                sameNameCNAME = true
+                        }</span>
+                default:<span class="cov0" title="0">
+                        logger.Warn().Str("kind", string(r.Kind)).Msg(fmt.Sprintf("Unknown record kind in existing records"))</span>
+                }
+        }
+
+        // Rule 1: CNAME cannot coexist any address records (A or AAAA)
+        <span class="cov8" title="1">if newR.IsCNAME() &amp;&amp; sameNameAnyAddress </span><span class="cov8" title="1">{
+                return NewRecordValidationError(fmt.Sprintf("%s -&gt; %s - cannot add a CNAME when A/AAAA records exist with the same name", newR.Name, newR.Value))
+        }</span>
+        <span class="cov8" title="1">if (newR.IsAddress()) &amp;&amp; sameNameCNAME </span><span class="cov8" title="1">{
+                return NewRecordValidationError(fmt.Sprintf("%s -&gt; %s - cannot add A/AAAA when a CNAME exists with the same name", newR.Name, newR.Value))
+        }</span>
+
+        // Rule 2: Only one CNAME per name
+        <span class="cov8" title="1">if newR.IsCNAME() &amp;&amp; sameNameCNAME </span><span class="cov8" title="1">{
+                return NewRecordValidationError(fmt.Sprintf("%s -&gt; %s - multiple CNAME records with the same name are not allowed", newR.Name, newR.Value))
+        }</span>
+
+        // Rule 3: no duplicate address values per family
+        <span class="cov8" title="1">if newR.IsA() &amp;&amp; dupAValue </span><span class="cov8" title="1">{
+                return NewRecordValidationError(fmt.Sprintf("%s -&gt; %s - duplicate A record value not allowed", newR.Name, newR.Value))
+        }</span>
+        <span class="cov8" title="1">if newR.IsAAAA() &amp;&amp; dupAAAAValue </span><span class="cov8" title="1">{
+                return NewRecordValidationError(fmt.Sprintf("%s -&gt; %s - duplicate AAAA record value not allowed", newR.Name, newR.Value))
+        }</span>
+
+        // Rule 4: CNAME cycle detection
+        <span class="cov8" title="1">if newR.IsCNAME() </span><span class="cov8" title="1">{
+                forward := map[string]string{}
+                for _, ri := range existing </span><span class="cov8" title="1">{
+                        if ri.Record.IsCNAME() </span><span class="cov8" title="1">{
+                                if _, exists := forward[ri.Record.Name]; exists </span><span class="cov0" title="0">{
+                                        logger.Warn().Msg(fmt.Sprintf("Duplicate CNAME definitions detected in remote registry for domain %s", ri.Record.Name))
+                                }</span> else<span class="cov8" title="1"> {
+                                        forward[ri.Record.Name] = ri.Record.Value
+                                }</span>
+                        }
+                }
+                <span class="cov8" title="1">forward[newR.Name] = newR.Value
+
+                seen := map[string]struct{}{}
+                cur := newR.Name
+                for </span><span class="cov8" title="1">{
+                        v, ok := forward[cur]
+                        if !ok </span><span class="cov8" title="1">{
+                                break</span>
+                        }
+                        <span class="cov8" title="1">if _, s := seen[cur]; s </span><span class="cov8" title="1">{
+                                return NewRecordValidationError(fmt.Sprintf("CNAME cycle detected starting at: %s", newR.Name))
+                        }</span>
+                        <span class="cov8" title="1">seen[cur] = struct{}{}
+                        cur = v</span>
+                }
+        }
+
+        <span class="cov8" title="1">return nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file7" style="display: none">package event
+
+import (
+        "context"
+        "time"
+
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+        "github.com/docker/docker/api/types/container"
+        "github.com/docker/docker/api/types/events"
+        "github.com/docker/docker/api/types/filters"
+        "github.com/rs/zerolog"
+)
+
+type DockerGenerator struct {
+        logger zerolog.Logger
+        cli    dockerClient
+}
+
+func NewDockerGenerator(cli dockerClient, logger zerolog.Logger) *DockerGenerator <span class="cov8" title="1">{
+        return &amp;DockerGenerator{
+                logger: logger,
+                cli:    cli,
+        }
+}</span>
+
+func (dw *DockerGenerator) Subscribe(ctx context.Context) (&lt;-chan domain.ContainerEvent, error) <span class="cov8" title="1">{
+        const bufferSize = 100 // TODO: config this
+        out := make(chan domain.ContainerEvent, bufferSize)
+
+        go func() </span><span class="cov8" title="1">{
+                defer close(out)
+
+                since := time.Now()
+
+                // Process initial list of containers
+                opts := container.ListOptions{All: false}
+                containers, err := dw.cli.ContainerList(ctx, opts)
+                if err != nil </span><span class="cov8" title="1">{
+                        dw.logger.Error().Err(err).Msg("getting list of containers")
+                        return
+                }</span>
+                <span class="cov8" title="1">for _, c := range containers </span><span class="cov8" title="1">{
+                        select </span>{
+                        case out &lt;- fromContainerSummary(c):<span class="cov8" title="1"></span>
+                        case &lt;-ctx.Done():<span class="cov0" title="0">
+                                dw.logger.Info().Msg("Docker event generator cancelled during initial emit")
+                                return</span>
+                        }
+                }
+
+                // Set up channel to get docker container events
+                // Create a filter to get container events
+                <span class="cov8" title="1">filterArgs := filters.NewArgs()
+                filterArgs.Add("type", "container")
+                filterArgs.Add("event", "start")
+                filterArgs.Add("event", "stop")
+                filterArgs.Add("event", "die")
+
+                options := events.ListOptions{
+                        Filters: filterArgs,
+                        Since:   since.Format(time.RFC3339Nano),
+                }
+                eventCh, errCh := dw.cli.Events(ctx, options)
+
+                for </span><span class="cov8" title="1">{
+                        select </span>{
+                        case &lt;-ctx.Done():<span class="cov8" title="1">
+                                dw.logger.Info().Msg("Docker watcher cancelled by context")
+                                return</span>
+                        case err, ok := &lt;-errCh:<span class="cov8" title="1">
+                                if ok &amp;&amp; err != nil </span><span class="cov8" title="1">{
+                                        dw.logger.Error().Err(err).Msg("Error from Docker events stream")
+                                }</span>
+                        case msg, ok := &lt;-eventCh:<span class="cov8" title="1">
+                                if !ok </span><span class="cov8" title="1">{
+                                        dw.logger.Info().Msg("Docker events channel closed")
+                                        return
+                                }</span>
+
+                                <span class="cov8" title="1">event, convErr := fromEventsMessage(msg)
+                                if convErr != nil </span><span class="cov8" title="1">{
+                                        if _, ok := convErr.(*UnsupportedEventTypeError); ok </span><span class="cov8" title="1">{
+                                                dw.logger.Debug().Err(convErr).Msg("Error converting docker event message to container event")
+                                        }</span> else<span class="cov0" title="0"> {
+                                                dw.logger.Error().Err(convErr).Msg("converting docker event message to container event")
+                                        }</span>
+                                        <span class="cov8" title="1">continue</span>
+                                }
+
+                                <span class="cov8" title="1">dw.logger.Debug().Msgf("Received Docker event: %+v", event)
+                                select </span>{
+                                case out &lt;- event:<span class="cov8" title="1"></span>
+                                case &lt;-ctx.Done():<span class="cov0" title="0">
+                                        return</span>
+                                }
+                        }
+                }
+        }()
+
+        <span class="cov8" title="1">return out, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file8" style="display: none">package event
+
+import (
+        "strings"
+        "time"
+
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+        "github.com/docker/docker/api/types/container"
+        "github.com/docker/docker/api/types/events"
+)
+
+func fromContainerSummary(c container.Summary) domain.ContainerEvent <span class="cov8" title="1">{
+        name := ""
+        if len(c.Names) &gt; 0 </span><span class="cov8" title="1">{
+                name = strings.TrimPrefix(c.Names[0], "/")
+        }</span>
+        <span class="cov8" title="1">return domain.ContainerEvent{
+                Container: domain.Container{
+                        Id:      c.ID,
+                        Name:    name,
+                        Created: time.Unix(c.Created, 0),
+                        Labels:  c.Labels,
+                },
+                EventType: domain.EventTypeInitialContainerDetection,
+        }</span>
+}
+
+func fromEventsMessage(msg events.Message) (domain.ContainerEvent, error) <span class="cov8" title="1">{
+        ev := domain.ContainerEvent{
+                Container: domain.Container{
+                        Id:      msg.ID,
+                        Name:    msg.Actor.Attributes["name"],
+                        Created: time.Unix(0, msg.TimeNano),
+                        Labels:  msg.Actor.Attributes,
+                },
+                EventType: domain.EventType(msg.Status),
+        }
+        if !ev.EventType.IsValid() </span><span class="cov8" title="1">{
+                return domain.ContainerEvent{}, NewUnsupportedEventTypeError(ev.EventType)
+        }</span>
+        <span class="cov8" title="1">return ev, nil</span>
+}
+</pre>
+		
+		<pre class="file" id="file9" style="display: none">package event
+
+import (
+        "fmt"
+
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+)
+
+type UnsupportedEventTypeError struct {
+        eventType domain.EventType
+}
+
+func NewUnsupportedEventTypeError(eventType domain.EventType) *UnsupportedEventTypeError <span class="cov8" title="1">{
+        return &amp;UnsupportedEventTypeError{eventType: eventType}
+}</span>
+
+func (e *UnsupportedEventTypeError) Error() string <span class="cov8" title="1">{
+        return fmt.Sprintf("Unsupported event type: %s", e.eventType)
+}</span>
+</pre>
+		
+		<pre class="file" id="file10" style="display: none">package registry
+
+import (
+        "fmt"
+        "strings"
+
+        "github.com/auto-dns/docker-coredns-sync/internal/util"
+)
+
+func keyBaseForFQDN(prefix, fqdn string) string <span class="cov8" title="1">{
+        prefix = strings.TrimRight(prefix, "/")
+        trimmed := strings.TrimSuffix(strings.TrimSpace(fqdn), ".")
+        parts := strings.Split(trimmed, ".")
+        parts = util.Reverse(parts)
+        return fmt.Sprintf("%s/%s", prefix, strings.Join(parts, "/"))
+}</span>
+
+// From a full etcd key to FQDN (handles trailing xNN segment)
+func fqdnFromKey(prefix, key string) string <span class="cov8" title="1">{
+        prefix = strings.TrimRight(prefix, "/")
+        path := strings.TrimPrefix(key, prefix)
+        path = strings.TrimPrefix(path, "/")
+        parts := strings.Split(path, "/")
+        if n := len(parts); n &gt; 0 &amp;&amp; strings.HasPrefix(parts[n-1], "x") </span><span class="cov8" title="1">{
+                parts = parts[:n-1]
+        }</span>
+        <span class="cov8" title="1">parts = util.Reverse(parts)
+        return strings.Join(parts, ".")</span>
+}
+</pre>
+		
+		<pre class="file" id="file11" style="display: none">package registry
+
+import (
+        "context"
+        "encoding/json"
+        "fmt"
+        "sort"
+        "strconv"
+        "strings"
+        "time"
+
+        "github.com/auto-dns/docker-coredns-sync/internal/config"
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+        "github.com/rs/zerolog"
+        clientv3 "go.etcd.io/etcd/client/v3"
+)
+
+type EtcdRegistry struct {
+        client   etcdClient
+        cfg      *config.EtcdConfig
+        hostname string
+        logger   zerolog.Logger
+}
+
+func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string, logger zerolog.Logger) *EtcdRegistry <span class="cov8" title="1">{
+        return &amp;EtcdRegistry{
+                client:   client,
+                cfg:      cfg,
+                hostname: hostname,
+                logger:   logger.With().Str("component", "etcd_registry").Logger(),
+        }
+}</span>
+
+// getNextIndexedKey generates a new etcd key for a record based on its fully qualified domain name (fqdn).
+func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (string, error) <span class="cov8" title="1">{
+        base := keyBaseForFQDN(er.cfg.PathPrefix, fqdn)
+        existing := make(map[int]struct{})
+
+        resp, err := er.client.Get(ctx, base, clientv3.WithPrefix(), clientv3.WithKeysOnly(), clientv3.WithSerializable())
+        if err != nil </span><span class="cov8" title="1">{
+                return "", fmt.Errorf("list existing indices under %q: %w", base, err)
+        }</span>
+        <span class="cov8" title="1">for _, kv := range resp.Kvs </span><span class="cov8" title="1">{
+                keyStr := string(kv.Key)
+                // ensure we're only looking at immediate children under base
+                if !strings.HasPrefix(keyStr, base+"/") </span><span class="cov0" title="0">{
+                        continue</span>
+                }
+
+                <span class="cov8" title="1">suffix := keyStr[len(base)+1:] // after trailing slash
+                if strings.HasPrefix(suffix, "x") </span><span class="cov8" title="1">{
+                        if n, err := strconv.Atoi(suffix[1:]); err == nil </span><span class="cov8" title="1">{
+                                existing[n] = struct{}{}
+                        }</span>
+                }
+        }
+        <span class="cov8" title="1">idx := 1
+        for </span><span class="cov8" title="1">{
+                if _, exists := existing[idx]; !exists </span><span class="cov8" title="1">{
+                        break</span>
+                }
+                <span class="cov8" title="1">idx++</span>
+        }
+        <span class="cov8" title="1">return fmt.Sprintf("%s/x%d", base, idx), nil</span>
+}
+
+// Register stores the record intent in etcd.
+func (er *EtcdRegistry) Register(ctx context.Context, ri *domain.RecordIntent) error <span class="cov8" title="1">{
+        fqdn := ri.Record.Name
+        key, err := er.getNextIndexedKey(ctx, fqdn)
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("compute next key for %q: %w", fqdn, err)
+        }</span>
+        <span class="cov8" title="1">value, err := marshalEtcdValue(ri)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("marshal etcd value for %q: %w", fqdn, err)
+        }</span>
+        <span class="cov8" title="1">if _, err := er.client.Put(ctx, key, value); err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("put key %q: %w", key, err)
+        }</span>
+        <span class="cov8" title="1">er.logger.Info().Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).Str("owner_container_id", ri.ContainerId).Str("key", key).Msg("registered record")
+        return nil</span>
+}
+
+func (er *EtcdRegistry) recordMatches(w etcdRecord, ri *domain.RecordIntent) bool <span class="cov8" title="1">{
+        return w.Host == ri.Record.Value &amp;&amp;
+                w.Kind == ri.Record.Kind &amp;&amp;
+                w.OwnerHostname == ri.Hostname &amp;&amp;
+                w.OwnerContainerName == ri.ContainerName &amp;&amp;
+                (ri.ContainerId == "" || w.OwnerContainerId == ri.ContainerId)
+}</span>
+
+// Remove finds and deletes the etcd key that matches the record domain.
+func (er *EtcdRegistry) Remove(ctx context.Context, ri *domain.RecordIntent) error <span class="cov8" title="1">{
+        base := keyBaseForFQDN(er.cfg.PathPrefix, ri.Record.Name)
+
+        resp, err := er.client.Get(ctx, base, clientv3.WithPrefix())
+        if err != nil </span><span class="cov8" title="1">{
+                return fmt.Errorf("list keys under base %q: %w", base, err)
+        }</span>
+
+        // Collect keys to delete
+        <span class="cov8" title="1">toDelete := make([]string, 0, len(resp.Kvs))
+        for _, kv := range resp.Kvs </span><span class="cov8" title="1">{
+                keyStr := string(kv.Key)
+                if !strings.HasPrefix(keyStr, base+"/") </span><span class="cov8" title="1">{
+                        continue</span>
+                }
+                <span class="cov8" title="1">var wire etcdRecord
+                if err := json.Unmarshal(kv.Value, &amp;wire); err != nil </span><span class="cov8" title="1">{
+                        er.logger.Warn().Err(err).Str("key", keyStr).Msg("unmarshal etcd record")
+                        continue</span>
+                }
+                <span class="cov8" title="1">if er.recordMatches(wire, ri) </span><span class="cov8" title="1">{
+                        toDelete = append(toDelete, keyStr)
+                }</span>
+        }
+
+        <span class="cov8" title="1">if len(toDelete) == 0 </span><span class="cov8" title="1">{
+                er.logger.Debug().
+                        Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).
+                        Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).
+                        Str("owner_container_name", ri.ContainerName).
+                        Msg("remove: no matching keys")
+                return nil
+        }</span>
+
+        // Delete all matches (keep going on errors)
+        // delete in batches to avoid overly-large transactions
+        <span class="cov8" title="1">const batchSize = 64
+        var firstErr error
+
+        for i := 0; i &lt; len(toDelete); i += batchSize </span><span class="cov8" title="1">{
+                end := i + batchSize
+                if end &gt; len(toDelete) </span><span class="cov8" title="1">{
+                        end = len(toDelete)
+                }</span>
+                <span class="cov8" title="1">batch := toDelete[i:end]
+
+                txn := er.client.Txn(ctx)
+                ops := make([]clientv3.Op, 0, len(batch))
+                for _, k := range batch </span><span class="cov8" title="1">{
+                        ops = append(ops, clientv3.OpDelete(k))
+                }</span>
+                <span class="cov8" title="1">if _, err := txn.Then(ops...).Commit(); err != nil </span><span class="cov0" title="0">{
+                        er.logger.Warn().Err(err).Int("batch_start", i).Int("batch_end", end).Msg("remove: batch delete failed")
+                        if firstErr == nil </span><span class="cov0" title="0">{
+                                firstErr = fmt.Errorf("batch delete [%d:%d]: %w", i, end, err)
+                        }</span>
+                } else<span class="cov8" title="1"> {
+                        for _, k := range batch </span><span class="cov8" title="1">{
+                                er.logger.Info().Str("key", k).Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).Str("owner_container_id", ri.ContainerId).Msg("remove: deleted record")
+                        }</span>
+                }
+        }
+
+        <span class="cov8" title="1">return firstErr</span>
+}
+
+// List retrieves all record intents stored in etcd under the configured prefix.
+func (er *EtcdRegistry) List(ctx context.Context) ([]*domain.RecordIntent, error) <span class="cov8" title="1">{
+        prefix := er.cfg.PathPrefix
+        resp, err := er.client.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
+        if err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("list under prefix %q: %w", prefix, err)
+        }</span>
+        <span class="cov8" title="1">intents := make([]*domain.RecordIntent, 0, len(resp.Kvs))
+        for _, kv := range resp.Kvs </span><span class="cov8" title="1">{
+                ri, err := unmarshalEtcdValue(string(kv.Key), string(kv.Value), er.cfg.PathPrefix)
+                if err != nil </span><span class="cov8" title="1">{
+                        er.logger.Warn().Err(err).Msgf("Failed to parse key: %s", kv.Key)
+                        continue</span>
+                }
+                <span class="cov8" title="1">intents = append(intents, ri)</span>
+        }
+        <span class="cov8" title="1">return intents, nil</span>
+}
+
+// LockTransaction provides a distributed lock using etcd transactions.
+// It takes keys (as a slice of string), tries to acquire locks on all of them,
+// runs the function, and finally releases all locks.
+func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn func() error) error <span class="cov8" title="1">{
+        // Ensure unique sorted keys.
+        uniq := make(map[string]struct{}, len(keys))
+        for _, k := range keys </span><span class="cov8" title="1">{
+                uniq[k] = struct{}{}
+        }</span>
+        <span class="cov8" title="1">uniqueKeys := make([]string, 0, len(uniq))
+        for k := range uniq </span><span class="cov8" title="1">{
+                uniqueKeys = append(uniqueKeys, k)
+        }</span>
+        <span class="cov8" title="1">sort.Strings(uniqueKeys)
+
+        leases := make([]heldLease, 0, len(uniqueKeys))
+
+        for _, key := range uniqueKeys </span><span class="cov8" title="1">{
+                lockKey := fmt.Sprintf("/locks/%s", key)
+                leaseResp, err := er.client.Grant(ctx, int64(er.cfg.LockTTL))
+                if err != nil </span><span class="cov8" title="1">{
+                        return fmt.Errorf("failed to create lease: %w", err)
+                }</span>
+                <span class="cov8" title="1">acquired := false
+                start := time.Now()
+                for time.Since(start) &lt; time.Duration(er.cfg.LockTimeout)*time.Second </span><span class="cov8" title="1">{
+                        select </span>{
+                        case &lt;-ctx.Done():<span class="cov8" title="1">
+                                return ctx.Err()</span>
+                        default:<span class="cov8" title="1"></span>
+                        }
+
+                        <span class="cov8" title="1">txnResp, err := er.client.Txn(ctx).
+                                If(clientv3.Compare(clientv3.CreateRevision(lockKey), "=", 0)).
+                                Then(clientv3.OpPut(lockKey, er.hostname, clientv3.WithLease(leaseResp.ID))).
+                                Commit()
+                        if err != nil </span><span class="cov8" title="1">{
+                                return fmt.Errorf("acquire lock %q: %w", lockKey, err)
+                        }</span>
+                        <span class="cov8" title="1">if txnResp.Succeeded </span><span class="cov8" title="1">{
+                                acquired = true
+
+                                // Start keepalive for this lease
+                                kaCtx, cancel := context.WithCancel(ctx)
+                                kaCh, err := er.client.KeepAlive(kaCtx, leaseResp.ID)
+                                if err != nil </span><span class="cov8" title="1">{
+                                        cancel()
+                                        // best-effort cleanup
+                                        _, _ = er.client.Delete(ctx, lockKey)
+                                        _, _ = er.client.Revoke(ctx, leaseResp.ID)
+                                        return fmt.Errorf("keepalive for lock %q: %w", lockKey, err)
+                                }</span>
+
+                                // Drain keepalive responses until cancel
+                                <span class="cov8" title="1">go func() </span><span class="cov8" title="1">{
+                                        for range kaCh </span>{<span class="cov0" title="0">
+                                                // noop; presence keeps the lease alive
+                                        }</span>
+                                }()
+
+                                <span class="cov8" title="1">leases = append(leases, heldLease{lockKey: lockKey, lease: leaseResp.ID, cancel: cancel})
+                                break</span>
+                        }
+                        <span class="cov0" title="0">time.Sleep(time.Duration(er.cfg.LockRetryInterval * float64(time.Second)))</span>
+                }
+                <span class="cov8" title="1">if !acquired </span><span class="cov0" title="0">{
+                        if _, e := er.client.Revoke(ctx, leaseResp.ID); e != nil </span><span class="cov0" title="0">{
+                                er.logger.Warn().Err(e).Str("lock", lockKey).Msg("revoke unused lease after acquire timeout")
+                        }</span>
+                        <span class="cov0" title="0">return fmt.Errorf("failed to acquire lock on %s", key)</span>
+                }
+        }
+
+        <span class="cov8" title="1">err := fn()
+
+        // Release the locks in reverse order
+        for i := len(leases) - 1; i &gt;= 0; i-- </span><span class="cov8" title="1">{
+                l := leases[i]
+                l.cancel() // Stop the keepalive first
+                if _, e := er.client.Delete(ctx, l.lockKey); e != nil </span><span class="cov0" title="0">{
+                        er.logger.Warn().Err(e).Msgf("failed to delete lock key %s", l.lockKey)
+                }</span>
+                <span class="cov8" title="1">if _, e := er.client.Revoke(ctx, l.lease); e != nil </span><span class="cov0" title="0">{
+                        er.logger.Warn().Err(e).Msgf("failed to revoke lease for %s", l.lockKey)
+                }</span>
+        }
+        <span class="cov8" title="1">return err</span>
+}
+
+func (er *EtcdRegistry) Close() error <span class="cov8" title="1">{
+        return er.client.Close()
+}</span>
+</pre>
+		
+		<pre class="file" id="file12" style="display: none">package registry
+
+import (
+        "encoding/json"
+        "fmt"
+        "time"
+
+        "github.com/auto-dns/docker-coredns-sync/internal/domain"
+)
+
+type etcdRecord struct {
+        Host               string            `json:"host"`
+        Kind               domain.RecordKind `json:"record_type"`
+        OwnerHostname      string            `json:"owner_hostname"`
+        OwnerContainerId   string            `json:"owner_container_id"`
+        OwnerContainerName string            `json:"owner_container_name"`
+        Created            time.Time         `json:"created"`
+        Force              bool              `json:"force"`
+}
+
+func marshalEtcdValue(ri *domain.RecordIntent) (string, error) <span class="cov8" title="1">{
+        wire := etcdRecord{
+                Host:               ri.Record.Value,
+                Kind:               ri.Record.Kind,
+                OwnerHostname:      ri.Hostname,
+                OwnerContainerId:   ri.ContainerId,
+                OwnerContainerName: ri.ContainerName,
+                Created:            ri.Created,
+                Force:              ri.Force,
+        }
+        b, err := json.Marshal(wire)
+        if err != nil </span><span class="cov0" title="0">{
+                return "", err
+        }</span>
+        <span class="cov8" title="1">return string(b), nil</span>
+}
+
+func unmarshalEtcdValue(key string, raw string, prefix string) (*domain.RecordIntent, error) <span class="cov8" title="1">{
+        fqdn := fqdnFromKey(prefix, key)
+
+        var wire etcdRecord
+        if err := json.Unmarshal([]byte(raw), &amp;wire); err != nil </span><span class="cov8" title="1">{
+                return nil, fmt.Errorf("decode etcd value: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">rec, err := domain.NewFromKind(wire.Kind, fqdn, wire.Host)
+        if err != nil </span><span class="cov8" title="1">{
+                return nil, err
+        }</span>
+
+        <span class="cov8" title="1">return &amp;domain.RecordIntent{
+                ContainerId:   wire.OwnerContainerId,
+                ContainerName: wire.OwnerContainerName,
+                Created:       wire.Created,
+                Hostname:      wire.OwnerHostname,
+                Force:         wire.Force,
+                Record:        rec,
+        }, nil</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
