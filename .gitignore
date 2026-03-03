@@ -5,6 +5,8 @@
 __debug_*
 
 # Test coverage
+cover*.out
+cover*.html
 coverage*.out
 coverage*.html
 *.coverprofile
