@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -18,6 +19,47 @@ import (
 type contextKey string
 
 const configKey = contextKey("config")
+
+type AppRunner interface {
+	Run(ctx context.Context) error
+	Close() error
+}
+
+type AppFactory func(cfg *config.Config, log zerolog.Logger) (AppRunner, error)
+
+var defaultAppFactory AppFactory = func(cfg *config.Config, log zerolog.Logger) (AppRunner, error) {
+	return app.New(cfg, log)
+}
+
+func runWithDeps(cfg *config.Config, factory AppFactory, sigCh <-chan os.Signal) error {
+	logInstance := logger.SetupLogger(&cfg.Logging)
+
+	application, err := factory(cfg, logInstance)
+	if err != nil {
+		return fmt.Errorf("failed to create app: %w", err)
+	}
+	defer func() {
+		if cerr := application.Close(); cerr != nil {
+			logInstance.Error().Err(cerr).Msg("error during app close")
+		}
+	}()
+
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+
+	go func() {
+		sig, ok := <-sigCh
+		if ok {
+			logInstance.Info().Msgf("Received signal: %v", sig)
+			stop()
+		}
+	}()
+
+	if err := application.Run(ctx); err != nil {
+		return fmt.Errorf("app run error: %w", err)
+	}
+	return nil
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "docker-coredns-sync",
@@ -33,41 +75,12 @@ var rootCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// Load configuration.
 		cfg := cmd.Context().Value(configKey).(*config.Config)
 
-		// Set up logger.
-		logInstance := logger.SetupLogger(&cfg.Logging)
-
-		// Create the application.
-		application, err := app.New(cfg, logInstance)
-		if err != nil {
-			return fmt.Errorf("failed to create app: %w", err)
-		}
-		defer func() {
-			if cerr := application.Close(); cerr != nil {
-				logInstance.Error().Err(cerr).Msg("error during app close")
-			}
-		}()
-
-		// Create a context with cancellation for graceful shutdown.
-		ctx, stop := context.WithCancel(context.Background())
-		defer stop()
-
-		// Listen for OS signals.
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-		go func() {
-			sig := <-sigCh
-			logInstance.Info().Msgf("Received signal: %v", sig)
-			stop()
-		}()
 
-		// Run the application. When context is canceled, Run returns.
-		if err := application.Run(ctx); err != nil {
-			return fmt.Errorf("app run error: %w", err)
-		}
-		return nil
+		return runWithDeps(cfg, defaultAppFactory, sigCh)
 	},
 }
 
