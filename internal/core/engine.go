@@ -36,12 +36,7 @@ func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
 	case !evt.EventType.IsValid():
 		se.logger.Warn().Str("container_id", evt.Container.Id).Str("event_type", string(evt.EventType)).Msg("handled unsupported event type")
 	case evt.EventType == domain.EventTypeInitialContainerDetection, evt.EventType == domain.EventTypeContainerStarted:
-		intents, err := GetContainerRecordIntents(evt, se.cfg, se.logger)
-		if err != nil {
-			se.logger.Error().Err(err).Msg("Error building record intents")
-			return
-		}
-		// If intents are returned, update the state tracker.
+		intents := GetContainerRecordIntents(evt, se.cfg, se.logger)
 		if len(intents) > 0 {
 			se.state.Upsert(evt.Container.Id, evt.Container.Name, evt.Container.Created, intents, "running")
 			se.logger.Info().Msgf("Upserted state for container %s", evt.Container.Id)

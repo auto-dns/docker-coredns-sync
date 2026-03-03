@@ -9,7 +9,7 @@ import (
 )
 
 // GetContainerRecordIntents parses the container event's labels and returns record intents.
-func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfig, logger zerolog.Logger) ([]*domain.RecordIntent, error) {
+func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfig, logger zerolog.Logger) []*domain.RecordIntent {
 	var intents []*domain.RecordIntent
 
 	prefix := cfg.DockerLabelPrefix
@@ -17,7 +17,7 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfi
 
 	if !parsedLabels.Enabled {
 		logger.Debug().Msg("Record generation not enabled for container")
-		return intents, nil
+		return intents
 	}
 
 	for _, labeledRecord := range parsedLabels.Records {
@@ -81,5 +81,5 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfi
 		intents = append(intents, intent)
 	}
 
-	return intents, nil
+	return intents
 }

@@ -52,11 +52,8 @@ func TestGetContainerRecordIntents_NotEnabled(t *testing.T) {
 		"coredns.A.value": "192.168.1.1",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 0 {
 		t.Errorf("expected 0 intents when not enabled, got %d", len(intents))
 	}
@@ -70,11 +67,8 @@ func TestGetContainerRecordIntents_AWithValue(t *testing.T) {
 		"coredns.A.value": "192.168.1.1",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 1 {
 		t.Fatalf("expected 1 intent, got %d", len(intents))
 	}
@@ -98,11 +92,8 @@ func TestGetContainerRecordIntents_AWithDefaultIPv4(t *testing.T) {
 		"coredns.A.name":  "app.example.com",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 1 {
 		t.Fatalf("expected 1 intent, got %d", len(intents))
 	}
@@ -120,11 +111,8 @@ func TestGetContainerRecordIntents_ANoDefaultSkipped(t *testing.T) {
 		"coredns.A.name":  "app.example.com",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 0 {
 		t.Errorf("expected 0 intents when no default IP, got %d", len(intents))
 	}
@@ -138,11 +126,8 @@ func TestGetContainerRecordIntents_AAAAWithValue(t *testing.T) {
 		"coredns.AAAA.value": "2001:db8::1",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 1 {
 		t.Fatalf("expected 1 intent, got %d", len(intents))
 	}
@@ -163,11 +148,8 @@ func TestGetContainerRecordIntents_AAAAWithDefaultIPv6(t *testing.T) {
 		"coredns.AAAA.name": "app.example.com",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 1 {
 		t.Fatalf("expected 1 intent, got %d", len(intents))
 	}
@@ -185,11 +167,8 @@ func TestGetContainerRecordIntents_AAAANoDefaultSkipped(t *testing.T) {
 		"coredns.AAAA.name": "app.example.com",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 0 {
 		t.Errorf("expected 0 intents when no default IPv6, got %d", len(intents))
 	}
@@ -202,11 +181,8 @@ func TestGetContainerRecordIntents_CNAMERequiresValue(t *testing.T) {
 		"coredns.CNAME.name": "alias.example.com",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 0 {
 		t.Errorf("expected 0 intents for CNAME without value, got %d", len(intents))
 	}
@@ -220,11 +196,8 @@ func TestGetContainerRecordIntents_CNAMEWithValue(t *testing.T) {
 		"coredns.CNAME.value": "target.example.com",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 1 {
 		t.Fatalf("expected 1 intent, got %d", len(intents))
 	}
@@ -243,11 +216,8 @@ func TestGetContainerRecordIntents_SkipsEmptyName(t *testing.T) {
 		"coredns.A.value": "192.168.1.1",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 0 {
 		t.Errorf("expected 0 intents for empty name, got %d", len(intents))
 	}
@@ -261,11 +231,8 @@ func TestGetContainerRecordIntents_SkipsWhitespaceOnlyName(t *testing.T) {
 		"coredns.A.value": "192.168.1.1",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 0 {
 		t.Errorf("expected 0 intents for whitespace-only name, got %d", len(intents))
 	}
@@ -279,11 +246,8 @@ func TestGetContainerRecordIntents_InvalidRecordSkipped(t *testing.T) {
 		"coredns.A.value": "not-an-ip", // Invalid IP
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 0 {
 		t.Errorf("expected 0 intents for invalid record, got %d", len(intents))
 	}
@@ -298,11 +262,8 @@ func TestGetContainerRecordIntents_ForceInheritedFromContainer(t *testing.T) {
 		"coredns.A.value": "192.168.1.1",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 1 {
 		t.Fatalf("expected 1 intent, got %d", len(intents))
 	}
@@ -324,11 +285,8 @@ func TestGetContainerRecordIntents_ForceOverriddenPerRecord(t *testing.T) {
 		"coredns.A.api.value":   "192.168.1.2",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 2 {
 		t.Fatalf("expected 2 intents, got %d", len(intents))
 	}
@@ -364,11 +322,8 @@ func TestGetContainerRecordIntents_SetsContainerMetadata(t *testing.T) {
 		EventType: domain.EventTypeContainerStarted,
 	}
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 1 {
 		t.Fatalf("expected 1 intent, got %d", len(intents))
 	}
@@ -400,11 +355,8 @@ func TestGetContainerRecordIntents_MultipleRecords(t *testing.T) {
 		"coredns.CNAME.value": "app.example.com",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 3 {
 		t.Fatalf("expected 3 intents, got %d", len(intents))
 	}
@@ -422,11 +374,8 @@ func TestGetContainerRecordIntents_MultipleAliases(t *testing.T) {
 		"coredns.A.db.value":  "192.168.1.3",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 3 {
 		t.Fatalf("expected 3 intents, got %d", len(intents))
 	}
@@ -456,11 +405,8 @@ func TestGetContainerRecordIntents_ValidAndInvalidMixed(t *testing.T) {
 		"coredns.A.good.value":  "192.168.1.2",
 	})
 
-	intents, err := GetContainerRecordIntents(event, cfg, nopLogger())
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
 
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
 	if len(intents) != 2 {
 		t.Fatalf("expected 2 valid intents, got %d", len(intents))
 	}

@@ -1176,6 +1176,44 @@ func TestFilterRecordIntents_CNAMEVsAAndAAAA_AddressWins(t *testing.T) {
 	}
 }
 
+func TestFilterRecordIntents_UnsupportedKindSkipped(t *testing.T) {
+	// Create an intent with an unsupported record kind to hit the default case
+	unsupportedIntent := &domain.RecordIntent{
+		ContainerId:   "container-1",
+		ContainerName: "test",
+		Hostname:      "test-host",
+		Record:        domain.Record{Kind: "UNKNOWN", Name: "test.example.com", Value: "x"},
+	}
+
+	result := FilterRecordIntents([]*domain.RecordIntent{unsupportedIntent}, reconcileLogger())
+
+	// The unsupported record should be skipped entirely
+	if len(result) != 0 {
+		t.Errorf("expected 0 records (unsupported kind skipped), got %d", len(result))
+	}
+}
+
+func TestFilterRecordIntents_UnsupportedKindWithValidRecords(t *testing.T) {
+	// Mix of valid and unsupported record kinds
+	intents := []*domain.RecordIntent{
+		simpleIntent("app.example.com", domain.RecordA, "192.168.1.1", "c1", 5, false),
+		{
+			ContainerId:   "container-2",
+			ContainerName: "test",
+			Hostname:      "test-host",
+			Record:        domain.Record{Kind: "UNKNOWN", Name: "unknown.example.com", Value: "x"},
+		},
+		simpleIntent("app2.example.com", domain.RecordCNAME, "target.example.com", "c3", 5, false),
+	}
+
+	result := FilterRecordIntents(intents, reconcileLogger())
+
+	// Should have 2 records (the valid A and CNAME), unsupported skipped
+	if len(result) != 2 {
+		t.Errorf("expected 2 records (unsupported skipped), got %d", len(result))
+	}
+}
+
 // ============================================================================
 // Cross-host conflict resolution tests
 // ============================================================================

@@ -282,3 +282,44 @@ func TestValidateRecord_CNAMEWithUnrelatedExisting(t *testing.T) {
 		t.Errorf("expected no error for CNAME with unrelated existing, got: %v", err)
 	}
 }
+
+func TestValidateRecord_UnknownKindInExisting(t *testing.T) {
+	// Test that unknown record kinds in existing records are logged but don't block validation
+	newRI := makeIntent("test.example.com", domain.RecordA, "192.168.1.1")
+	existing := []*domain.RecordIntent{
+		{
+			ContainerId:   "container-1",
+			ContainerName: "test",
+			Hostname:      "test-host",
+			Record:        domain.Record{Kind: "UNKNOWN", Name: "test.example.com", Value: "x"},
+		},
+	}
+
+	err := ValidateRecord(newRI, existing, testLogger())
+
+	// Unknown kinds should be logged but not cause validation errors
+	if err != nil {
+		t.Errorf("expected no error for unknown kind in existing, got: %v", err)
+	}
+}
+
+func TestValidateRecord_UnknownKindMixedWithKnown(t *testing.T) {
+	// Test validation when existing records include both known and unknown kinds
+	newRI := makeIntent("test.example.com", domain.RecordCNAME, "target.example.com")
+	existing := []*domain.RecordIntent{
+		{
+			ContainerId:   "container-1",
+			ContainerName: "test",
+			Hostname:      "test-host",
+			Record:        domain.Record{Kind: "UNKNOWN", Name: "test.example.com", Value: "x"},
+		},
+		makeIntent("test.example.com", domain.RecordA, "192.168.1.1"),
+	}
+
+	err := ValidateRecord(newRI, existing, testLogger())
+
+	// Should still catch the CNAME vs A conflict
+	if err == nil {
+		t.Error("expected error for CNAME vs existing A record")
+	}
+}
