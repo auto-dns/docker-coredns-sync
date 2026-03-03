@@ -188,12 +188,13 @@ func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.Ap
 			if ri.Hostname == cfg.Hostname {
 				logger.Info().Msgf("Removing stale record: %s (owned by %s/%s)", ri.Record.Render(), ri.Hostname, ri.ContainerName)
 				toRemoveMap[ri.Key()] = ri
+				continue // Don't add stale records to lookup - they're already being removed
 			} else {
 				logger.Debug().Msgf("Skipping removal of record %s not owned by this host (%s != %s)", ri.Record.Render(), ri.Hostname, cfg.Hostname)
 			}
-		} else {
-			actualByNameKind.Get(ri.Record.Name).Get(ri.Record.Kind).Set(ri.Record.Value, ri)
 		}
+		// Add all non-stale records to lookup for conflict detection in Step 2
+		actualByNameKind.Get(ri.Record.Name).Get(ri.Record.Kind).Set(ri.Record.Value, ri)
 	}
 
 	// Step 2: Reconcile each desired record

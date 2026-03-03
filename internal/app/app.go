@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
@@ -16,32 +17,51 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+type Closeable interface {
+	Close() error
+}
+
 type App struct {
-	dockerClient *dockerCli.Client
-	etcdClient   *clientv3.Client
+	dockerClient Closeable
+	etcdClient   Closeable
 	engine       *core.SyncEngine
 	logger       zerolog.Logger
 }
 
-// New creates a new App by wiring up all dependencies.
-func New(cfg *config.Config, logger zerolog.Logger) (*App, error) {
-	// Docker CLI
-	dockerClient, err := dockerCli.NewClientWithOpts(dockerCli.FromEnv, dockerCli.WithAPIVersionNegotiation())
+type DockerClientFactory func() (*dockerCli.Client, error)
+type EtcdClientFactory func(endpoints []string, dialTimeout time.Duration) (*clientv3.Client, error)
+
+type ClientFactories struct {
+	DockerClientFactory DockerClientFactory
+	EtcdClientFactory   EtcdClientFactory
+}
+
+func DefaultFactories() ClientFactories {
+	return ClientFactories{
+		DockerClientFactory: func() (*dockerCli.Client, error) {
+			return dockerCli.NewClientWithOpts(dockerCli.FromEnv, dockerCli.WithAPIVersionNegotiation())
+		},
+		EtcdClientFactory: func(endpoints []string, dialTimeout time.Duration) (*clientv3.Client, error) {
+			return clientv3.New(clientv3.Config{
+				Endpoints:   endpoints,
+				DialTimeout: dialTimeout,
+			})
+		},
+	}
+}
+
+func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories ClientFactories) (*App, error) {
+	dockerClient, err := factories.DockerClientFactory()
 	if err != nil {
 		return nil, err
 	}
 	gen := event.NewDockerGenerator(dockerClient, logger)
 
-	// etcd CLI
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   cfg.Etcd.Endpoints,
-		DialTimeout: 2 * time.Second,
-	})
+	etcdClient, err := factories.EtcdClientFactory(cfg.Etcd.Endpoints, 2*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 
-	// Engine
 	reg := registry.NewEtcdRegistry(etcdClient, &cfg.Etcd, cfg.App.Hostname, logger)
 	memState := state.NewMemoryState()
 	engine := core.NewSyncEngine(logger, &cfg.App, gen, reg, memState)
@@ -53,6 +73,12 @@ func New(cfg *config.Config, logger zerolog.Logger) (*App, error) {
 		logger:       logger,
 	}, nil
 }
+
+func New(cfg *config.Config, logger zerolog.Logger) (*App, error) {
+	return NewWithFactories(cfg, logger, DefaultFactories())
+}
+
+var _ io.Closer = (*App)(nil)
 
 // Run starts the application by running the sync engine.
 func (a *App) Run(ctx context.Context) error {
