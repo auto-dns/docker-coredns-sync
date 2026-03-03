@@ -2,7 +2,9 @@
 /.devcontainer/etcd
 .DS_Store
 /.devcontainer/.shell_history
-/.mypy_cache
-/.pytest_cache
-/.ruff_cache
 __debug_*
+
+# Test coverage
+coverage*.out
+coverage*.html
+*.coverprofile

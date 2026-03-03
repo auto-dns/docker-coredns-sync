@@ -494,3 +494,42 @@ func TestBoolFromLabel(t *testing.T) {
 		})
 	}
 }
+
+func TestParseLabels_InvalidFieldSkipped(t *testing.T) {
+	labels := map[string]string{
+		"coredns.enabled":       "true",
+		"coredns.A.web.name":    "app.example.com",
+		"coredns.A.web.value":   "192.168.1.1",
+		"coredns.A.web.invalid": "should-be-ignored",
+		"coredns.A.web.other":   "also-ignored",
+	}
+
+	result := ParseLabels("coredns", labels)
+
+	if len(result.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(result.Records))
+	}
+
+	rec := result.Records[0]
+	if rec.Name != "app.example.com" {
+		t.Errorf("expected name 'app.example.com', got %q", rec.Name)
+	}
+	if rec.Value != "192.168.1.1" {
+		t.Errorf("expected value '192.168.1.1', got %q", rec.Value)
+	}
+}
+
+func TestParseLabels_OnlyInvalidFieldsNoRecord(t *testing.T) {
+	labels := map[string]string{
+		"coredns.enabled":       "true",
+		"coredns.A.web.invalid": "ignored",
+		"coredns.A.web.other":   "also-ignored",
+	}
+
+	result := ParseLabels("coredns", labels)
+
+	// Invalid fields should not create records
+	if len(result.Records) != 0 {
+		t.Errorf("expected 0 records for invalid fields only, got %d", len(result.Records))
+	}
+}

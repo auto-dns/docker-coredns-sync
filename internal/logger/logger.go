@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -9,9 +10,14 @@ import (
 	"github.com/rs/zerolog"
 )
 
+var (
+	getHostname = os.Hostname
+	stdout      io.Writer = os.Stdout
+)
+
 func SetupLogger(cfg *config.LoggingConfig) zerolog.Logger {
 	consoleWriter := zerolog.ConsoleWriter{
-		Out:        os.Stdout,
+		Out:        stdout,
 		TimeFormat: "2006-01-02 15:04:05",
 	}
 
@@ -25,7 +31,7 @@ func SetupLogger(cfg *config.LoggingConfig) zerolog.Logger {
 
 	zerolog.TimeFieldFormat = time.RFC3339
 
-	hostname, err := os.Hostname()
+	hostname, err := getHostname()
 	if err != nil {
 		hostname = "unknown-host"
 	}

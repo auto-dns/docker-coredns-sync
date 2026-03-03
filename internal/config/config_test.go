@@ -1,7 +1,11 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
+
+	"github.com/spf13/viper"
 )
 
 func validConfig() *Config {
@@ -401,5 +405,276 @@ func TestIsValidIPv6_WhitespaceHandling(t *testing.T) {
 	// Function trims whitespace
 	if !isValidIPv6("  ::1  ") {
 		t.Error("expected whitespace-padded IPv6 to be valid after trim")
+	}
+}
+
+func resetViper() {
+	viper.Reset()
+	viper.SetEnvPrefix("DOCKER_COREDNS_SYNC")
+}
+
+func TestLoad_Success_FromEnvVars(t *testing.T) {
+	resetViper()
+	defer resetViper()
+
+	t.Setenv("DOCKER_COREDNS_SYNC_APP_DOCKER_LABEL_PREFIX", "coredns")
+	t.Setenv("DOCKER_COREDNS_SYNC_APP_HOSTNAME", "test-host")
+	t.Setenv("DOCKER_COREDNS_SYNC_APP_HOST_IPV4", "192.168.1.1")
+	t.Setenv("DOCKER_COREDNS_SYNC_APP_HOST_IPV6", "::1")
+	t.Setenv("DOCKER_COREDNS_SYNC_APP_POLL_INTERVAL", "10")
+	t.Setenv("DOCKER_COREDNS_SYNC_ETCD_ENDPOINTS", "http://localhost:2379")
+	t.Setenv("DOCKER_COREDNS_SYNC_ETCD_PATH_PREFIX", "/skydns")
+	t.Setenv("DOCKER_COREDNS_SYNC_ETCD_LOCK_TTL", "5.0")
+	t.Setenv("DOCKER_COREDNS_SYNC_ETCD_LOCK_TIMEOUT", "2.0")
+	t.Setenv("DOCKER_COREDNS_SYNC_ETCD_LOCK_RETRY_INTERVAL", "0.1")
+	t.Setenv("DOCKER_COREDNS_SYNC_LOG_LEVEL", "INFO")
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("expected Load to succeed, got error: %v", err)
+	}
+	if cfg.App.Hostname != "test-host" {
+		t.Errorf("expected hostname 'test-host', got %q", cfg.App.Hostname)
+	}
+	if cfg.App.DockerLabelPrefix != "coredns" {
+		t.Errorf("expected label prefix 'coredns', got %q", cfg.App.DockerLabelPrefix)
+	}
+}
+
+func TestLoad_Success_FromConfigFile(t *testing.T) {
+	resetViper()
+	defer resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := `
+app:
+  docker_label_prefix: "coredns"
+  hostname: "file-host"
+  host_ipv4: "10.0.0.1"
+  host_ipv6: "fe80::1"
+  poll_interval: 15
+etcd:
+  endpoints:
+    - "http://etcd1:2379"
+  path_prefix: "/dns"
+  lock_ttl: 10.0
+  lock_timeout: 5.0
+  lock_retry_interval: 0.5
+log:
+  level: "DEBUG"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	viper.Set("config", configPath)
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("expected Load to succeed, got error: %v", err)
+	}
+	if cfg.App.Hostname != "file-host" {
+		t.Errorf("expected hostname 'file-host', got %q", cfg.App.Hostname)
+	}
+	if cfg.Etcd.PathPrefix != "/dns" {
+		t.Errorf("expected path prefix '/dns', got %q", cfg.Etcd.PathPrefix)
+	}
+}
+
+func TestLoad_Success_NoConfigFile_UsesDefaults(t *testing.T) {
+	resetViper()
+	defer resetViper()
+
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tmpDir)
+
+	t.Setenv("DOCKER_COREDNS_SYNC_APP_HOSTNAME", "default-host")
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("expected Load to succeed with defaults, got error: %v", err)
+	}
+	if cfg.App.DockerLabelPrefix != "coredns" {
+		t.Errorf("expected default label prefix 'coredns', got %q", cfg.App.DockerLabelPrefix)
+	}
+	if cfg.App.PollInterval != 5 {
+		t.Errorf("expected default poll interval 5, got %d", cfg.App.PollInterval)
+	}
+}
+
+func TestLoad_InitConfigError_InvalidYAML(t *testing.T) {
+	resetViper()
+	defer resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	invalidYAML := `
+app:
+  hostname: "test
+  invalid yaml content [[[
+`
+	if err := os.WriteFile(configPath, []byte(invalidYAML), 0644); err != nil {
+		t.Fatalf("failed to write invalid config file: %v", err)
+	}
+
+	viper.Set("config", configPath)
+
+	_, err := Load()
+
+	if err == nil {
+		t.Error("expected Load to fail with invalid YAML")
+	}
+}
+
+func TestLoad_ValidationError(t *testing.T) {
+	resetViper()
+	defer resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := `
+app:
+  docker_label_prefix: ""
+  hostname: "test-host"
+  poll_interval: 5
+etcd:
+  endpoints:
+    - "http://localhost:2379"
+  path_prefix: "/skydns"
+  lock_ttl: 5.0
+  lock_timeout: 2.0
+  lock_retry_interval: 0.1
+log:
+  level: "INFO"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	viper.Set("config", configPath)
+
+	_, err := Load()
+
+	if err == nil {
+		t.Error("expected Load to fail with validation error for empty label prefix")
+	}
+}
+
+func TestLoad_WithConfigFlag(t *testing.T) {
+	resetViper()
+	defer resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "custom-config.yaml")
+	configContent := `
+app:
+  docker_label_prefix: "custom"
+  hostname: "custom-host"
+  poll_interval: 20
+etcd:
+  endpoints:
+    - "http://custom-etcd:2379"
+  path_prefix: "/custom"
+  lock_ttl: 5.0
+  lock_timeout: 2.0
+  lock_retry_interval: 0.1
+log:
+  level: "WARN"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	viper.Set("config", configPath)
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("expected Load to succeed, got error: %v", err)
+	}
+	if cfg.App.DockerLabelPrefix != "custom" {
+		t.Errorf("expected label prefix 'custom', got %q", cfg.App.DockerLabelPrefix)
+	}
+	if cfg.App.Hostname != "custom-host" {
+		t.Errorf("expected hostname 'custom-host', got %q", cfg.App.Hostname)
+	}
+}
+
+func TestLoad_DefaultConfigPaths(t *testing.T) {
+	resetViper()
+	defer resetViper()
+
+	tmpDir := t.TempDir()
+	oldWd, _ := os.Getwd()
+	defer os.Chdir(oldWd)
+	os.Chdir(tmpDir)
+
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := `
+app:
+  docker_label_prefix: "found"
+  hostname: "found-host"
+  poll_interval: 5
+etcd:
+  endpoints:
+    - "http://localhost:2379"
+  path_prefix: "/skydns"
+  lock_ttl: 5.0
+  lock_timeout: 2.0
+  lock_retry_interval: 0.1
+log:
+  level: "INFO"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	cfg, err := Load()
+
+	if err != nil {
+		t.Fatalf("expected Load to succeed, got error: %v", err)
+	}
+	if cfg.App.DockerLabelPrefix != "found" {
+		t.Errorf("expected label prefix 'found', got %q", cfg.App.DockerLabelPrefix)
+	}
+}
+
+func TestLoad_UnmarshalError(t *testing.T) {
+	resetViper()
+	defer resetViper()
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	configContent := `
+app:
+  docker_label_prefix: "test"
+  hostname: "test-host"
+  poll_interval: "not-an-int"
+etcd:
+  endpoints:
+    - "http://localhost:2379"
+  path_prefix: "/skydns"
+  lock_ttl: 5.0
+  lock_timeout: 2.0
+  lock_retry_interval: 0.1
+log:
+  level: "INFO"
+`
+	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	viper.Set("config", configPath)
+
+	_, err := Load()
+
+	if err == nil {
+		t.Error("expected Load to fail with unmarshal error for string in int field")
 	}
 }
