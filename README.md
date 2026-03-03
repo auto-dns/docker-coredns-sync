@@ -123,6 +123,57 @@ etcd:
   lock_retry_interval: 0.1
 ```
 
+---
+
+## Development
+
+### Prerequisites
+
+- Go 1.21+
+- golangci-lint (optional, for linting)
+
+### Running Tests
+
+```bash
+# Run all tests
+make test
+
+# Run tests with verbose output
+make test-verbose
+
+# Run tests with race detection
+make test-race
+
+# Run tests with coverage report
+make test-coverage
+
+# Generate HTML coverage report
+make test-coverage-html
+```
+
+### Or without Make:
+
+```bash
+go test ./...
+go test -race -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+```
+
+### Linting and Formatting
+
+```bash
+make lint     # Run golangci-lint
+make format   # Format code with go fmt and goimports
+make check    # Run both lint and test
+```
+
+### Building
+
+```bash
+make build      # Build production Docker image
+make build-dev  # Build development Docker image
+```
+
 ## License
 
 This project is licensed under a [custom MIT-NC License](./LICENSE), which permits non-commercial use only.

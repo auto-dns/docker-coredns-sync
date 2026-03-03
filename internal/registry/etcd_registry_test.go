@@ -1279,6 +1279,37 @@ func TestEtcdRegistry_getNextIndexedKey_ConsecutiveIndices(t *testing.T) {
 	}
 }
 
+func TestEtcdRegistry_getNextIndexedKey_KeyWithoutSlash(t *testing.T) {
+	mock := newMockEtcdClient()
+	cfg := testConfig()
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+
+	// Keys that don't have the base+/ prefix should be skipped
+	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+		return &clientv3.GetResponse{
+			Kvs: []*mvccpb.KeyValue{
+				{Key: []byte("/skydns/com/example/app")},        // Exact base, no slash
+				{Key: []byte("/skydns/com/example/appx1")},      // No slash before x1
+				{Key: []byte("/skydns/com/example/app/x1")},     // Valid key
+				{Key: []byte("/skydns/com/example/app/nested/x2")}, // Nested path (suffix contains /)
+			},
+		}, nil
+	}
+
+	ctx := context.Background()
+	key, err := reg.getNextIndexedKey(ctx, "app.example.com")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should pick x2 since only x1 is valid; nested path suffix is "nested/x2" which doesn't parse
+	expected := "/skydns/com/example/app/x2"
+	if key != expected {
+		t.Errorf("expected key %q, got %q", expected, key)
+	}
+}
+
 func TestEtcdRegistry_Remove_ContainerIdEmpty(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()

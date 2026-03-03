@@ -1,4 +1,4 @@
-.PHONY: build build-dev push up down init-env release unrelease dev-init test lint format check format-imports
+.PHONY: build build-dev push up down init-env release unrelease dev-init test test-verbose test-race test-coverage test-coverage-html lint format check
 
 PROJECT_NAME := docker-coredns-sync
 IMAGE := ghcr.io/auto-dns/$(PROJECT_NAME)
@@ -44,17 +44,32 @@ dev-init:
 	@mkdir -p .devcontainer/etcd
 	@touch .devcontainer/config.yaml
 
+# Testing
 test:
-	pytest tests
+	go test ./...
 
+test-verbose:
+	go test -v ./...
+
+test-race:
+	go test -race ./...
+
+test-coverage:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
+
+test-coverage-html:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -html=coverage.out -o coverage.html
+
+# Linting (requires golangci-lint)
 lint:
-	ruff check src tests
-	mypy src tests
+	golangci-lint run ./...
 
+# Formatting
 format:
-	black src tests
+	go fmt ./...
+	goimports -w .
 
+# Combined check
 check: lint test
-
-format-imports:
-	ruff format src tests
