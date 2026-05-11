@@ -201,7 +201,7 @@ func TestInit_FlagsRegistered(t *testing.T) {
 		"app.host-ipv6",
 		"app.hostname",
 		"app.poll-interval",
-		"etcd-endpoint",
+		"etcd-endpoints",
 		"etcd.path-prefix",
 		"etcd.lock-ttl",
 		"etcd.lock-timeout",
