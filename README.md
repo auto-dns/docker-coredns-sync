@@ -55,6 +55,28 @@ coredns.cname.app.value=target.example.com
 
 ---
 
+## Docker
+
+```bash
+docker pull ghcr.io/auto-dns/docker-coredns-sync:latest
+```
+
+### docker-compose snippet
+
+```yaml
+docker-coredns-sync:
+  image: ghcr.io/auto-dns/docker-coredns-sync:latest
+  restart: unless-stopped
+  volumes:
+    - /var/run/docker.sock:/var/run/docker.sock:ro
+    - ./config.yaml:/config/config.yaml:ro
+  environment:
+    DOCKER_COREDNS_SYNC_APP_HOSTNAME: mozart
+    DOCKER_COREDNS_SYNC_APP_HOST_IPV4: 192.168.205.10
+```
+
+---
+
 ## Configuration Overview
 
 Configuration values can be provided via:
@@ -75,8 +97,7 @@ Configuration values can be provided via:
 | `--app.host-ip` | `app.host_ip` | `DOCKER_COREDNS_SYNC_APP_HOST_IP` | `string` | `"127.0.0.1"` | IP to use for A records |
 | `--app.hostname` | `app.hostname` | `DOCKER_COREDNS_SYNC_APP_HOSTNAME` | `string` | `"your-hostname"` | Unique logical hostname for this node |
 | `--app.poll-interval` | `app.poll_interval` | `DOCKER_COREDNS_SYNC_APP_POLL_INTERVAL` | `int` | `5` | How often to reconcile the registry (in seconds) |
-| `--etcd.host` | `etcd.host` | `DOCKER_COREDNS_SYNC_ETCD_HOST` | `string` | `"localhost"` | etcd host |
-| `--etcd.port` | `etcd.port` | `DOCKER_COREDNS_SYNC_ETCD_PORT` | `int` | `2379` | etcd port |
+| *(config file only)* | `etcd.endpoints` | `DOCKER_COREDNS_SYNC_ETCD_ENDPOINTS` | `[]string` | `["http://localhost:2379"]` | etcd endpoint URLs (supports multiple for cluster) |
 | `--etcd.path-prefix` | `etcd.path_prefix` | `DOCKER_COREDNS_SYNC_ETCD_PATH_PREFIX` | `string` | `"/skydns"` | etcd base path |
 | `--etcd.lock-ttl` | `etcd.lock_ttl` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TTL` | `float` | `5.0` | Lock lease time-to-live in seconds |
 | `--etcd.lock-timeout` | `etcd.lock_timeout` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TIMEOUT` | `float` | `2.0` | Lock acquisition timeout |
@@ -116,7 +137,9 @@ log:
 
 etcd:
   endpoints:
-    - http://etcd:2379
+    - http://192.168.201.10:2379
+    - http://192.168.201.11:2379
+    - http://192.168.201.12:2379
   path_prefix: /skydns
   lock_ttl: 5.0
   lock_timeout: 2.0
@@ -129,7 +152,7 @@ etcd:
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.26.3+
 - golangci-lint (optional, for linting)
 
 ### Running Tests
