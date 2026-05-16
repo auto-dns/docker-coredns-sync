@@ -1,6 +1,6 @@
 module github.com/auto-dns/docker-coredns-sync
 
-go 1.25.0
+go 1.26.3
 
 require (
 	github.com/docker/docker v28.0.4+incompatible

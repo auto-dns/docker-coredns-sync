@@ -1,5 +1,5 @@
 # ===== Stage 1: Builder =====
-FROM golang:1.25 AS builder
+FROM golang:1.26.3 AS builder
 WORKDIR /app
 
 # Copy go.mod and go.sum first to leverage caching for dependencies.
@@ -14,7 +14,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o docker-coredns-sync ./
 
 
 # ===== Stage 2: Development Environment =====
-FROM golang:1.25 AS dev
+FROM golang:1.26.3 AS dev
 WORKDIR /workspace
 RUN groupadd --gid 1000 vscode && \
     useradd --uid 1000 --gid vscode -m vscode
