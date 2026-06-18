@@ -15,6 +15,14 @@ type Config struct {
 	App     AppConfig     `mapstructure:"app"`
 	Etcd    EtcdConfig    `mapstructure:"etcd"`
 	Logging LoggingConfig `mapstructure:"log"`
+	HTTP    HTTPConfig    `mapstructure:"http"`
+}
+
+// HTTPConfig configures the auxiliary HTTP server that serves health/readiness
+// (and, in future, metrics) endpoints.
+type HTTPConfig struct {
+	Enabled    bool   `mapstructure:"enabled"`
+	ListenAddr string `mapstructure:"listen_addr"`
 }
 
 // AppConfig holds application-specific configuration.
@@ -97,6 +105,8 @@ func initConfig() error {
 	viper.SetDefault("etcd.lock_timeout", 2.0)
 	viper.SetDefault("etcd.lock_retry_interval", 0.1)
 	viper.SetDefault("log.level", "INFO")
+	viper.SetDefault("http.enabled", false)
+	viper.SetDefault("http.listen_addr", ":8080")
 
 	// Read config file if it exists
 	if err := viper.ReadInConfig(); err != nil {
@@ -150,6 +160,9 @@ func (c *Config) validate() error {
 	}
 	if _, ok := validLevels[strings.ToUpper(c.Logging.Level)]; !ok {
 		return fmt.Errorf("log.level must be a valid log level, got: %s", c.Logging.Level)
+	}
+	if c.HTTP.Enabled && strings.TrimSpace(c.HTTP.ListenAddr) == "" {
+		return fmt.Errorf("http.listen_addr cannot be empty when http.enabled is true")
 	}
 	return nil
 }

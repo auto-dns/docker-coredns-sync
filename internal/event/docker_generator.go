@@ -12,8 +12,9 @@ import (
 )
 
 type DockerGenerator struct {
-	logger zerolog.Logger
-	cli    dockerClient
+	logger             zerolog.Logger
+	cli                dockerClient
+	onConnectionChange func(connected bool)
 }
 
 func NewDockerGenerator(cli dockerClient, logger zerolog.Logger) *DockerGenerator {
@@ -23,12 +24,25 @@ func NewDockerGenerator(cli dockerClient, logger zerolog.Logger) *DockerGenerato
 	}
 }
 
+// SetConnectionObserver registers an optional callback invoked when the Docker
+// event stream connects (true) or disconnects (false). Safe to leave unset.
+func (dw *DockerGenerator) SetConnectionObserver(fn func(connected bool)) {
+	dw.onConnectionChange = fn
+}
+
+func (dw *DockerGenerator) setConnected(connected bool) {
+	if dw.onConnectionChange != nil {
+		dw.onConnectionChange(connected)
+	}
+}
+
 func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.ContainerEvent, error) {
 	const bufferSize = 100 // TODO: config this
 	out := make(chan domain.ContainerEvent, bufferSize)
 
 	go func() {
 		defer close(out)
+		defer dw.setConnected(false)
 
 		since := time.Now()
 
@@ -39,6 +53,7 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 			dw.logger.Error().Err(err).Msg("getting list of containers")
 			return
 		}
+		dw.setConnected(true)
 		for _, c := range containers {
 			select {
 			case out <- fromContainerSummary(c):

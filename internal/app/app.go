@@ -10,6 +10,7 @@ import (
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
 	"github.com/auto-dns/docker-coredns-sync/internal/core"
 	"github.com/auto-dns/docker-coredns-sync/internal/event"
+	"github.com/auto-dns/docker-coredns-sync/internal/health"
 	"github.com/auto-dns/docker-coredns-sync/internal/registry"
 	"github.com/auto-dns/docker-coredns-sync/internal/state"
 	dockerCli "github.com/docker/docker/client"
@@ -21,6 +22,7 @@ type App struct {
 	dockerClient io.Closer
 	etcdClient   io.Closer
 	engine       *core.SyncEngine
+	healthServer *health.Server
 	logger       zerolog.Logger
 }
 
@@ -62,12 +64,24 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 	memState := state.NewMemoryState()
 	engine := core.NewSyncEngine(logger, &cfg.App, gen, reg, memState)
 
-	return &App{
+	app := &App{
 		dockerClient: dockerClient,
 		etcdClient:   etcdClient,
 		engine:       engine,
 		logger:       logger,
-	}, nil
+	}
+
+	if cfg.HTTP.Enabled {
+		// Consider the daemon stale if a reconciliation has not succeeded within
+		// a few poll intervals.
+		readyThreshold := 3 * time.Duration(cfg.App.PollInterval) * time.Second
+		status := health.NewStatus(readyThreshold)
+		engine.SetReconcileReporter(status)
+		gen.SetConnectionObserver(status.SetDockerConnected)
+		app.healthServer = health.NewServer(cfg.HTTP.ListenAddr, status, logger)
+	}
+
+	return app, nil
 }
 
 func New(cfg *config.Config, logger zerolog.Logger) (*App, error) {
@@ -79,6 +93,9 @@ var _ io.Closer = (*App)(nil)
 // Run starts the application by running the sync engine.
 func (a *App) Run(ctx context.Context) error {
 	a.logger.Info().Msg("Application starting")
+	if a.healthServer != nil {
+		a.healthServer.Start(ctx)
+	}
 	return a.engine.Run(ctx)
 }
 

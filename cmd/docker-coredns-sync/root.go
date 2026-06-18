@@ -127,6 +127,13 @@ func init() {
 	// LoggingConfig Flag
 	rootCmd.PersistentFlags().String("log.level", "", "Log level (e.g., TRACE, DEBUG, INFO, WARN, ERROR, FATAL)")
 	viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log.level"))
+
+	// HTTPConfig Flags
+	rootCmd.PersistentFlags().Bool("http.enabled", false, "Enable the HTTP server for health/readiness endpoints")
+	viper.BindPFlag("http.enabled", rootCmd.PersistentFlags().Lookup("http.enabled"))
+
+	rootCmd.PersistentFlags().String("http.listen-addr", "", "Listen address for the HTTP server (e.g., :8080)")
+	viper.BindPFlag("http.listen_addr", rootCmd.PersistentFlags().Lookup("http.listen-addr"))
 }
 
 // Execute runs the root command.
