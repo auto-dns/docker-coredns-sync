@@ -5,10 +5,18 @@ import "time"
 type EventType string
 
 const (
-	EventTypeContainerDied             = "die"
-	EventTypeContainerStarted          = "start"
-	EventTypeContainerStopped          = "stop"
-	EventTypeInitialContainerDetection = "initial_detection"
+	EventTypeContainerDied             EventType = "die"
+	EventTypeContainerStarted          EventType = "start"
+	EventTypeContainerStopped          EventType = "stop"
+	EventTypeInitialContainerDetection EventType = "initial_detection"
+)
+
+// ContainerStatus is the in-memory lifecycle state the tracker keeps per container.
+type ContainerStatus string
+
+const (
+	StatusRunning ContainerStatus = "running"
+	StatusRemoved ContainerStatus = "removed"
 )
 
 func (et EventType) IsValid() bool {

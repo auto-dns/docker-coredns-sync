@@ -276,13 +276,13 @@ func TestGetContainerRecordIntents_ForceInheritedFromContainer(t *testing.T) {
 func TestGetContainerRecordIntents_ForceOverriddenPerRecord(t *testing.T) {
 	cfg := makeTestConfig()
 	event := makeContainerEvent(map[string]string{
-		"coredns.enabled":       "true",
-		"coredns.force":         "true",
-		"coredns.A.web.name":    "web.example.com",
-		"coredns.A.web.value":   "192.168.1.1",
-		"coredns.A.web.force":   "false", // Override container force
-		"coredns.A.api.name":    "api.example.com",
-		"coredns.A.api.value":   "192.168.1.2",
+		"coredns.enabled":     "true",
+		"coredns.force":       "true",
+		"coredns.A.web.name":  "web.example.com",
+		"coredns.A.web.value": "192.168.1.1",
+		"coredns.A.web.force": "false", // Override container force
+		"coredns.A.api.name":  "api.example.com",
+		"coredns.A.api.value": "192.168.1.2",
 	})
 
 	intents := GetContainerRecordIntents(event, cfg, nopLogger())

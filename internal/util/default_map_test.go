@@ -186,50 +186,6 @@ func TestDefaultMap_Values_EmptyMap(t *testing.T) {
 	}
 }
 
-func TestDefaultMap_Items_ReturnsInternalMap(t *testing.T) {
-	dm := NewDefaultMap[string](func() int { return 0 })
-	dm.Set("a", 1)
-	dm.Set("b", 2)
-
-	items := dm.Items()
-
-	if len(items) != 2 {
-		t.Errorf("expected 2 items, got %d", len(items))
-	}
-	if items["a"] != 1 {
-		t.Errorf("expected items[\"a\"] = 1, got %d", items["a"])
-	}
-	if items["b"] != 2 {
-		t.Errorf("expected items[\"b\"] = 2, got %d", items["b"])
-	}
-}
-
-func TestDefaultMap_GetOrDefault_ReturnsExisting(t *testing.T) {
-	dm := NewDefaultMap[string](func() int { return 42 })
-	dm.Set("key", 100)
-
-	result := dm.GetOrDefault("key", 999)
-
-	if result != 100 {
-		t.Errorf("expected 100, got %d", result)
-	}
-}
-
-func TestDefaultMap_GetOrDefault_ReturnsDefaultOnMiss(t *testing.T) {
-	dm := NewDefaultMap[string](func() int { return 42 })
-
-	result := dm.GetOrDefault("missing", 999)
-
-	if result != 999 {
-		t.Errorf("expected 999, got %d", result)
-	}
-
-	// Should not have stored the key
-	if dm.Contains("missing") {
-		t.Error("expected GetOrDefault not to store the key")
-	}
-}
-
 func TestDefaultMap_WithPointerValues(t *testing.T) {
 	type data struct {
 		value int

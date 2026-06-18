@@ -434,8 +434,8 @@ func TestReconcileAndValidate_ComplexScenario(t *testing.T) {
 	now := time.Now()
 
 	desired := []*domain.RecordIntent{
-		makeRecordIntent("app1.example.com", domain.RecordA, "192.168.1.1", "c1", now, false, "test-host"),     // new
-		makeRecordIntent("app2.example.com", domain.RecordA, "192.168.1.2", "c2", now, false, "test-host"),     // already exists
+		makeRecordIntent("app1.example.com", domain.RecordA, "192.168.1.1", "c1", now, false, "test-host"),             // new
+		makeRecordIntent("app2.example.com", domain.RecordA, "192.168.1.2", "c2", now, false, "test-host"),             // already exists
 		makeRecordIntent("alias.example.com", domain.RecordCNAME, "target.example.com", "c3", now, false, "test-host"), // new
 	}
 
@@ -807,7 +807,7 @@ func TestFilterRecordIntents_ForceWinsDeduplication(t *testing.T) {
 func TestShouldReplaceAllExisting_MixedForceNewNotOlderThanSome(t *testing.T) {
 	newIntent := simpleIntent("app.example.com", domain.RecordCNAME, "target.example.com", "new", 3, true)
 	existing := []*domain.RecordIntent{
-		simpleIntent("app.example.com", domain.RecordA, "192.168.1.1", "e1", 5, true), // older with force
+		simpleIntent("app.example.com", domain.RecordA, "192.168.1.1", "e1", 5, true),  // older with force
 		simpleIntent("app.example.com", domain.RecordA, "192.168.1.2", "e2", 1, false), // newer without force
 	}
 
@@ -837,7 +837,7 @@ func TestShouldReplaceAllExisting_AllForceBothOlder(t *testing.T) {
 func TestShouldReplaceAllExisting_MixedForceNewOlderThanAllForce(t *testing.T) {
 	newIntent := simpleIntent("app.example.com", domain.RecordCNAME, "target.example.com", "new", 10, true)
 	existing := []*domain.RecordIntent{
-		simpleIntent("app.example.com", domain.RecordA, "192.168.1.1", "e1", 5, true),  // force, newer than new
+		simpleIntent("app.example.com", domain.RecordA, "192.168.1.1", "e1", 5, true),   // force, newer than new
 		simpleIntent("app.example.com", domain.RecordA, "192.168.1.2", "e2", 15, false), // non-force, older than new
 	}
 

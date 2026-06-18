@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type mockTxn struct {

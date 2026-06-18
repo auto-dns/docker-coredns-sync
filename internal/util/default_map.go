@@ -22,14 +22,6 @@ func (d *DefaultMap[K, V]) Get(key K) V {
 	return val
 }
 
-// Does not modify the map
-func (d *DefaultMap[K, V]) GetOrDefault(key K, defaultVal V) V {
-	if val, ok := d.internal[key]; ok {
-		return val
-	}
-	return defaultVal
-}
-
 func (d *DefaultMap[K, V]) Peek(key K) (V, bool) {
 	val, ok := d.internal[key]
 	return val, ok
@@ -48,13 +40,9 @@ func (d *DefaultMap[K, V]) Delete(key K) {
 	delete(d.internal, key)
 }
 
-func (d *DefaultMap[K, V]) Items() map[K]V {
-	return d.internal
-}
-
 func (d *DefaultMap[K, V]) Keys() []K {
 	keys := make([]K, 0, len(d.internal))
-	for k, _ := range d.internal {
+	for k := range d.internal {
 		keys = append(keys, k)
 	}
 	return keys

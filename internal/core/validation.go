@@ -46,7 +46,7 @@ func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent,
 				sameNameCNAME = true
 			}
 		default:
-			logger.Warn().Str("kind", string(r.Kind)).Msg(fmt.Sprintf("Unknown record kind in existing records"))
+			logger.Warn().Str("kind", string(r.Kind)).Msg("Unknown record kind in existing records")
 		}
 	}
 
@@ -77,7 +77,7 @@ func ValidateRecord(newRI *domain.RecordIntent, existing []*domain.RecordIntent,
 		for _, ri := range existing {
 			if ri.Record.IsCNAME() {
 				if _, exists := forward[ri.Record.Name]; exists {
-					logger.Warn().Msg(fmt.Sprintf("Duplicate CNAME definitions detected in remote registry for domain %s", ri.Record.Name))
+					logger.Warn().Msgf("Duplicate CNAME definitions detected in remote registry for domain %s", ri.Record.Name)
 				} else {
 					forward[ri.Record.Name] = ri.Record.Value
 				}

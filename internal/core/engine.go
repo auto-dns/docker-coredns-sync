@@ -38,7 +38,7 @@ func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
 	case evt.EventType == domain.EventTypeInitialContainerDetection, evt.EventType == domain.EventTypeContainerStarted:
 		intents := GetContainerRecordIntents(evt, se.cfg, se.logger)
 		if len(intents) > 0 {
-			se.state.Upsert(evt.Container.Id, evt.Container.Name, evt.Container.Created, intents, "running")
+			se.state.Upsert(evt.Container.Id, evt.Container.Name, evt.Container.Created, intents, domain.StatusRunning)
 			se.logger.Info().Msgf("Upserted state for container %s", evt.Container.Id)
 		}
 	case evt.EventType == domain.EventTypeContainerStopped, evt.EventType == domain.EventTypeContainerDied:
@@ -54,7 +54,7 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 	// Step 1: Subscribe to Docker events
 	eventCh, err := se.gen.Subscribe(ctx)
 	if err != nil {
-		return fmt.Errorf("Failed to subscribe to Docker events: %w", err)
+		return fmt.Errorf("failed to subscribe to docker events: %w", err)
 	}
 
 	// Step 2: Launch a goroutine to process incoming events and update the state tracker.
@@ -86,7 +86,7 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 			err := se.reg.LockTransaction(ctx, []string{"__global__"}, func() error {
 				actual, err := se.reg.List(ctx)
 				if err != nil {
-					return fmt.Errorf("Error listing registry records: %w", err)
+					return fmt.Errorf("error listing registry records: %w", err)
 				}
 				desired := se.state.GetAllDesiredRecordIntents()
 				// Filter out any internally inconsistent intents:

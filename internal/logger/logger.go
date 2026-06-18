@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	getHostname = os.Hostname
+	getHostname           = os.Hostname
 	stdout      io.Writer = os.Stdout
 )
 

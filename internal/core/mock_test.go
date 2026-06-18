@@ -9,8 +9,8 @@ import (
 )
 
 type mockGenerator struct {
-	mu            sync.Mutex
-	subscribeFunc func(ctx context.Context) (<-chan domain.ContainerEvent, error)
+	mu              sync.Mutex
+	subscribeFunc   func(ctx context.Context) (<-chan domain.ContainerEvent, error)
 	subscribeCalled bool
 }
 
@@ -28,22 +28,22 @@ func (m *mockGenerator) Subscribe(ctx context.Context) (<-chan domain.ContainerE
 }
 
 type mockState struct {
-	mu                      sync.Mutex
-	upsertFunc              func(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status string)
-	markRemovedFunc         func(containerId string) bool
-	getAllDesiredFunc       func() []*domain.RecordIntent
-	
-	upsertCalled            bool
-	markRemovedCalled       bool
-	getAllDesiredCalled     bool
-	
+	mu                sync.Mutex
+	upsertFunc        func(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status domain.ContainerStatus)
+	markRemovedFunc   func(containerId string) bool
+	getAllDesiredFunc func() []*domain.RecordIntent
+
+	upsertCalled        bool
+	markRemovedCalled   bool
+	getAllDesiredCalled bool
+
 	lastUpsertContainerId   string
 	lastUpsertContainerName string
 	lastUpsertIntents       []*domain.RecordIntent
 	lastMarkRemovedId       string
 }
 
-func (m *mockState) Upsert(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status string) {
+func (m *mockState) Upsert(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status domain.ContainerStatus) {
 	m.mu.Lock()
 	m.upsertCalled = true
 	m.lastUpsertContainerId = containerId
@@ -98,15 +98,15 @@ type mockRegistry struct {
 	registerFunc        func(ctx context.Context, record *domain.RecordIntent) error
 	removeFunc          func(ctx context.Context, record *domain.RecordIntent) error
 	closeFunc           func() error
-	
+
 	lockTransactionCalled bool
 	listCalled            bool
 	registerCalled        bool
 	removeCalled          bool
 	closeCalled           bool
-	
-	registeredRecords     []*domain.RecordIntent
-	removedRecords        []*domain.RecordIntent
+
+	registeredRecords []*domain.RecordIntent
+	removedRecords    []*domain.RecordIntent
 }
 
 func (m *mockRegistry) LockTransaction(ctx context.Context, keys []string, fn func() error) error {
