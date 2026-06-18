@@ -10,6 +10,9 @@
 - Multiple domain support per container
 - Prevents CNAME cycles
 - Automatically removes stale records
+- Auto-reconnects to the Docker event stream with backoff if it drops
+- Optional health/readiness HTTP endpoints (`/healthz`, `/readyz`)
+- Dry-run mode to preview changes without writing to etcd
 - Graceful shutdown support
 - Flexible configuration via **flags**, **env vars**, and **config file**
 - Supports both **YAML** and **JSON** config formats
@@ -97,12 +100,18 @@ Configuration values can be provided via:
 | `--app.host-ip` | `app.host_ip` | `DOCKER_COREDNS_SYNC_APP_HOST_IP` | `string` | `"127.0.0.1"` | IP to use for A records |
 | `--app.hostname` | `app.hostname` | `DOCKER_COREDNS_SYNC_APP_HOSTNAME` | `string` | `"your-hostname"` | Unique logical hostname for this node |
 | `--app.poll-interval` | `app.poll_interval` | `DOCKER_COREDNS_SYNC_APP_POLL_INTERVAL` | `int` | `5` | How often to reconcile the registry (in seconds) |
+| `--app.dry-run` | `app.dry_run` | `DOCKER_COREDNS_SYNC_APP_DRY_RUN` | `bool` | `false` | Log planned etcd changes without applying them |
 | *(config file only)* | `etcd.endpoints` | `DOCKER_COREDNS_SYNC_ETCD_ENDPOINTS` | `[]string` | `["http://localhost:2379"]` | etcd endpoint URLs (supports multiple for cluster) |
 | `--etcd.path-prefix` | `etcd.path_prefix` | `DOCKER_COREDNS_SYNC_ETCD_PATH_PREFIX` | `string` | `"/skydns"` | etcd base path |
 | `--etcd.lock-ttl` | `etcd.lock_ttl` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TTL` | `float` | `5.0` | Lock lease time-to-live in seconds |
 | `--etcd.lock-timeout` | `etcd.lock_timeout` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TIMEOUT` | `float` | `2.0` | Lock acquisition timeout |
 | `--etcd.lock-retry-interval` | `etcd.lock_retry_interval` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_RETRY_INTERVAL` | `float` | `0.1` | Retry interval for lock acquisition |
 | `--log.level` | `log.level` | `DOCKER_COREDNS_SYNC_LOG_LEVEL` | `string` | `"INFO"` | Logging level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`) |
+| `--http.enabled` | `http.enabled` | `DOCKER_COREDNS_SYNC_HTTP_ENABLED` | `bool` | `false` | Enable the HTTP server for health/readiness endpoints |
+| `--http.listen-addr` | `http.listen_addr` | `DOCKER_COREDNS_SYNC_HTTP_LISTEN_ADDR` | `string` | `":8080"` | Listen address for the HTTP server |
+| *(config file only)* | `docker.event_buffer_size` | `DOCKER_COREDNS_SYNC_DOCKER_EVENT_BUFFER_SIZE` | `int` | `100` | Buffer size for the Docker event channel |
+| *(config file only)* | `docker.reconnect_initial_backoff` | `DOCKER_COREDNS_SYNC_DOCKER_RECONNECT_INITIAL_BACKOFF` | `float` | `1.0` | Initial reconnect backoff (seconds) when the Docker event stream drops |
+| *(config file only)* | `docker.reconnect_max_backoff` | `DOCKER_COREDNS_SYNC_DOCKER_RECONNECT_MAX_BACKOFF` | `float` | `30.0` | Maximum reconnect backoff (seconds) |
 
 ---
 
@@ -145,6 +154,20 @@ etcd:
   lock_timeout: 2.0
   lock_retry_interval: 0.1
 ```
+
+---
+
+## Health & Readiness
+
+When `http.enabled` is `true`, an HTTP server listens on `http.listen_addr`
+(default `:8080`) and exposes:
+
+- `GET /healthz` — liveness; returns `200` while the process is running.
+- `GET /readyz` — readiness; returns `200` only when the Docker event stream is
+  connected and a reconciliation has succeeded within the last few poll
+  intervals, otherwise `503` with a short reason.
+
+These are suitable for container/orchestrator liveness and readiness probes.
 
 ---
 

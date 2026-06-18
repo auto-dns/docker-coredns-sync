@@ -19,6 +19,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- Dry-run mode (`app.dry_run` / `--app.dry-run`): the reconciliation loop logs
+  the planned add/remove set and makes no changes to etcd. (#10)
+- Health and readiness HTTP endpoints (`http.enabled`, `http.listen_addr`):
+  `/healthz` for liveness and `/readyz` for readiness (Docker stream connected
+  and a recent successful reconciliation). (#9)
+- Configurable Docker event buffer and reconnect backoff
+  (`docker.event_buffer_size`, `docker.reconnect_initial_backoff`,
+  `docker.reconnect_max_backoff`). (#8)
+
+### Changed
+- The Docker event stream now reconnects automatically with bounded
+  exponential backoff when it drops, instead of silently going dead while the
+  reconciliation loop kept running on stale in-memory state. (#8)
+
 ## [0.6.1] - 2026-06-17
 
 Maintenance release. No functional or configuration changes — the application's
