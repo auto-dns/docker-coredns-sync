@@ -4,6 +4,9 @@
 /.devcontainer/.shell_history
 __debug_*
 
+# Compiled binary
+/docker-coredns-sync
+
 # Test coverage
 cover*.out
 cover*.html
