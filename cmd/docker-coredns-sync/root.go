@@ -105,6 +105,9 @@ func init() {
 	rootCmd.PersistentFlags().Int("app.poll-interval", 0, "Polling interval (in seconds) for reconciliation")
 	viper.BindPFlag("app.poll_interval", rootCmd.PersistentFlags().Lookup("app.poll-interval"))
 
+	rootCmd.PersistentFlags().Bool("app.dry-run", false, "Log planned etcd changes without applying them")
+	viper.BindPFlag("app.dry_run", rootCmd.PersistentFlags().Lookup("app.dry-run"))
+
 	// EtcdConfig Flags
 	rootCmd.PersistentFlags().StringArray("etcd-endpoints", []string{"http://localhost:2379"}, "etcd endpoints to connect to (can specify multiple times)")
 	viper.BindPFlag("etcd.endpoints", rootCmd.PersistentFlags().Lookup("etcd-endpoints"))
@@ -124,6 +127,13 @@ func init() {
 	// LoggingConfig Flag
 	rootCmd.PersistentFlags().String("log.level", "", "Log level (e.g., TRACE, DEBUG, INFO, WARN, ERROR, FATAL)")
 	viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log.level"))
+
+	// HTTPConfig Flags
+	rootCmd.PersistentFlags().Bool("http.enabled", false, "Enable the HTTP server for health/readiness endpoints")
+	viper.BindPFlag("http.enabled", rootCmd.PersistentFlags().Lookup("http.enabled"))
+
+	rootCmd.PersistentFlags().String("http.listen-addr", "", "Listen address for the HTTP server (e.g., :8080)")
+	viper.BindPFlag("http.listen_addr", rootCmd.PersistentFlags().Lookup("http.listen-addr"))
 }
 
 // Execute runs the root command.

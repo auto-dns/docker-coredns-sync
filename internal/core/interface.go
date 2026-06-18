@@ -14,6 +14,7 @@ type generator interface {
 type state interface {
 	Upsert(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status domain.ContainerStatus)
 	MarkRemoved(containerId string) bool
+	RetainRunning(runningIds map[string]struct{}) int
 	GetAllDesiredRecordIntents() []*domain.RecordIntent
 }
 
@@ -23,4 +24,10 @@ type upstreamRegistry interface {
 	Register(ctx context.Context, record *domain.RecordIntent) error
 	Remove(ctx context.Context, record *domain.RecordIntent) error
 	Close() error
+}
+
+// reconcileReporter is an optional observer of reconciliation outcomes, used to
+// feed liveness/readiness reporting. A nil error indicates a successful pass.
+type reconcileReporter interface {
+	RecordReconcile(err error)
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
 	"github.com/auto-dns/docker-coredns-sync/internal/core"
 	"github.com/auto-dns/docker-coredns-sync/internal/event"
+	"github.com/auto-dns/docker-coredns-sync/internal/health"
 	"github.com/auto-dns/docker-coredns-sync/internal/registry"
 	"github.com/auto-dns/docker-coredns-sync/internal/state"
 	dockerCli "github.com/docker/docker/client"
@@ -21,6 +22,8 @@ type App struct {
 	dockerClient io.Closer
 	etcdClient   io.Closer
 	engine       *core.SyncEngine
+	healthServer *health.Server
+	status       *health.Status
 	logger       zerolog.Logger
 }
 
@@ -51,10 +54,32 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 	if err != nil {
 		return nil, err
 	}
-	gen := event.NewDockerGenerator(dockerClient, logger)
+
+	// Status is shared by the engine (reconcile outcomes) and the Docker
+	// generator (connection state), and read by the health endpoints.
+	var status *health.Status
+	if cfg.HTTP.Enabled {
+		// Consider the daemon stale if a reconciliation has not succeeded within
+		// a few poll intervals.
+		readyThreshold := 3 * time.Duration(cfg.App.PollInterval) * time.Second
+		status = health.NewStatus(readyThreshold)
+	}
+
+	genOpts := []event.Option{
+		event.WithEventBufferSize(cfg.Docker.EventBufferSize),
+		event.WithReconnectBackoff(
+			time.Duration(cfg.Docker.ReconnectInitialBackoff*float64(time.Second)),
+			time.Duration(cfg.Docker.ReconnectMaxBackoff*float64(time.Second)),
+		),
+	}
+	if status != nil {
+		genOpts = append(genOpts, event.WithConnectionObserver(status.SetDockerConnected))
+	}
+	gen := event.NewDockerGenerator(dockerClient, logger, genOpts...)
 
 	etcdClient, err := factories.EtcdClientFactory(cfg.Etcd.Endpoints, 2*time.Second)
 	if err != nil {
+		_ = dockerClient.Close()
 		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 
@@ -62,12 +87,32 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 	memState := state.NewMemoryState()
 	engine := core.NewSyncEngine(logger, &cfg.App, gen, reg, memState)
 
-	return &App{
+	app := &App{
 		dockerClient: dockerClient,
 		etcdClient:   etcdClient,
 		engine:       engine,
 		logger:       logger,
-	}, nil
+	}
+
+	if status != nil {
+		// In dry-run the daemon intentionally writes nothing, so it never
+		// reports itself as a ready, authoritative syncer.
+		if cfg.App.DryRun {
+			status.SetDryRun(true)
+			logger.Warn().Msg("dry-run enabled: readiness will report not-ready (no records are applied)")
+		}
+		engine.SetReconcileReporter(status)
+		healthServer, err := health.NewServer(cfg.HTTP.ListenAddr, status, logger)
+		if err != nil {
+			_ = dockerClient.Close()
+			_ = etcdClient.Close()
+			return nil, err
+		}
+		app.status = status
+		app.healthServer = healthServer
+	}
+
+	return app, nil
 }
 
 func New(cfg *config.Config, logger zerolog.Logger) (*App, error) {
@@ -79,6 +124,9 @@ var _ io.Closer = (*App)(nil)
 // Run starts the application by running the sync engine.
 func (a *App) Run(ctx context.Context) error {
 	a.logger.Info().Msg("Application starting")
+	if a.healthServer != nil {
+		a.healthServer.Start(ctx)
+	}
 	return a.engine.Run(ctx)
 }
 
@@ -93,6 +141,11 @@ func (a *App) Close() error {
 	if a.etcdClient != nil {
 		if e := a.etcdClient.Close(); e != nil {
 			err = errors.Join(err, fmt.Errorf("close etcd client: %w", e))
+		}
+	}
+	if a.healthServer != nil {
+		if e := a.healthServer.Close(); e != nil {
+			err = errors.Join(err, fmt.Errorf("close health server: %w", e))
 		}
 	}
 

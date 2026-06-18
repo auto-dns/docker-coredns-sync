@@ -13,4 +13,9 @@ type containerState struct {
 	LastUpdated   time.Time
 	RecordIntents []*domain.RecordIntent
 	Status        domain.ContainerStatus
+	// missedResyncs counts consecutive resyncs in which this running container
+	// was absent from the live set. Pruning is debounced on this count so a
+	// container that is only transiently missing (e.g. mid-restart at the
+	// instant of a single snapshot) is not removed.
+	missedResyncs int
 }

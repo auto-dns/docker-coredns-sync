@@ -12,11 +12,12 @@ import (
 
 // SyncEngine coordinates event ingestion, state updates, and registry reconciliation.
 type SyncEngine struct {
-	logger zerolog.Logger
-	cfg    *config.AppConfig
-	gen    generator
-	state  state
-	reg    upstreamRegistry
+	logger   zerolog.Logger
+	cfg      *config.AppConfig
+	gen      generator
+	state    state
+	reg      upstreamRegistry
+	reporter reconcileReporter
 }
 
 func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, reg upstreamRegistry, state state) *SyncEngine {
@@ -29,8 +30,22 @@ func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, 
 	}
 }
 
+// SetReconcileReporter registers an optional observer that is notified of the
+// outcome of each reconciliation pass. Safe to leave unset.
+func (se *SyncEngine) SetReconcileReporter(r reconcileReporter) {
+	se.reporter = r
+}
+
 func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
 	switch {
+	case evt.EventType == domain.EventTypeResync:
+		running := make(map[string]struct{}, len(evt.RunningContainerIds))
+		for _, id := range evt.RunningContainerIds {
+			running[id] = struct{}{}
+		}
+		if removed := se.state.RetainRunning(running); removed > 0 {
+			se.logger.Info().Int("removed", removed).Msg("Pruned state for containers no longer running after resync")
+		}
 	case evt.Container.Id == "":
 		se.logger.Warn().Str("event_payload", fmt.Sprintf("%+v", evt)).Msg("handled container event with no container id")
 	case !evt.EventType.IsValid():
@@ -92,18 +107,38 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 				// Filter out any internally inconsistent intents:
 				desiredReconciled := FilterRecordIntents(desired, se.logger)
 				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, se.logger)
+				if se.cfg.DryRun {
+					for _, rec := range toRemove {
+						se.logger.Info().Str("record", rec.Render()).Msg("[dry-run] would remove record")
+					}
+					for _, rec := range toAdd {
+						se.logger.Info().Str("record", rec.Render()).Msg("[dry-run] would register record")
+					}
+					return nil
+				}
+				var writeErrs int
 				for _, rec := range toRemove {
 					if err := se.reg.Remove(ctx, rec); err != nil {
+						writeErrs++
 						se.logger.Error().Err(err).Msg("Error removing record")
 					}
 				}
 				for _, rec := range toAdd {
 					if err := se.reg.Register(ctx, rec); err != nil {
+						writeErrs++
 						se.logger.Error().Err(err).Msg("Error registering record")
 					}
 				}
+				if writeErrs > 0 {
+					// Surface write failures so the reconcile pass is not
+					// reported as successful (e.g. to readiness).
+					return fmt.Errorf("%d record write(s) failed during reconciliation", writeErrs)
+				}
 				return nil
 			})
+			if se.reporter != nil {
+				se.reporter.RecordReconcile(err)
+			}
 			if err != nil {
 				se.logger.Error().Err(err).Msg("Sync error")
 			}
