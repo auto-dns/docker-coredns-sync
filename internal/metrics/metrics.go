@@ -22,10 +22,15 @@ type Metrics struct {
 	lastReconcileSuccess prometheus.Gauge
 	recordsAdded         prometheus.Counter
 	recordsRemoved       prometheus.Counter
-	recordsSkipped       prometheus.Counter
+	recordsSkipped       prometheus.Gauge
 	etcdErrors           prometheus.Counter
 	etcdLockFailures     prometheus.Counter
 	dockerDisconnects    prometheus.Counter
+
+	// dryRun is set once at startup. In dry-run the daemon applies nothing, so a
+	// pass is not counted as a success and the last-success gauge is not
+	// refreshed (mirroring readiness, which also reports not-ready).
+	dryRun bool
 }
 
 // New constructs a Metrics set with all collectors registered on a fresh
@@ -55,9 +60,9 @@ func New() *Metrics {
 			Name: "dcs_records_removed_total",
 			Help: "Total number of DNS records removed from etcd.",
 		}),
-		recordsSkipped: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "dcs_records_skipped_total",
-			Help: "Total number of desired records dropped during conflict filtering.",
+		recordsSkipped: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "dcs_records_skipped",
+			Help: "Number of desired records dropped during conflict filtering on the most recent reconciliation. This is a steady-state count, not a cumulative total.",
 		}),
 		etcdErrors: prometheus.NewCounter(prometheus.CounterOpts{
 			Name: "dcs_etcd_errors_total",
@@ -86,6 +91,10 @@ func New() *Metrics {
 	return m
 }
 
+// SetDryRun marks the daemon as running in dry-run mode. Must be called before
+// the reconciliation loop starts. See the dryRun field for the effect.
+func (m *Metrics) SetDryRun(dryRun bool) { m.dryRun = dryRun }
+
 // Handler returns the HTTP handler that exposes this metrics set in the
 // Prometheus text exposition format.
 func (m *Metrics) Handler() http.Handler {
@@ -93,25 +102,25 @@ func (m *Metrics) Handler() http.Handler {
 }
 
 // ObserveReconcile records the outcome of a reconciliation pass: its duration,
-// the number of records added/removed and skipped during conflict filtering,
-// and whether the pass failed. A nil err refreshes the last-success gauge.
+// the number of records added/removed (cumulative counters) and currently
+// skipped during conflict filtering (a gauge), and whether the pass failed.
+// A successful non-dry-run pass refreshes the last-success gauge.
 func (m *Metrics) ObserveReconcile(duration time.Duration, added, removed, skipped int, err error) {
 	m.reconcileDuration.Observe(duration.Seconds())
-	if added > 0 {
-		m.recordsAdded.Add(float64(added))
-	}
-	if removed > 0 {
-		m.recordsRemoved.Add(float64(removed))
-	}
-	if skipped > 0 {
-		m.recordsSkipped.Add(float64(skipped))
-	}
-	if err != nil {
+	m.recordsAdded.Add(float64(added))
+	m.recordsRemoved.Add(float64(removed))
+	m.recordsSkipped.Set(float64(skipped))
+	switch {
+	case err != nil:
 		m.reconcileTotal.WithLabelValues("error").Inc()
-		return
+	case m.dryRun:
+		// A dry-run pass applies nothing, so it is neither a success nor an
+		// error and must not refresh the last-success gauge.
+		m.reconcileTotal.WithLabelValues("dry_run").Inc()
+	default:
+		m.reconcileTotal.WithLabelValues("success").Inc()
+		m.lastReconcileSuccess.Set(float64(time.Now().Unix()))
 	}
-	m.reconcileTotal.WithLabelValues("success").Inc()
-	m.lastReconcileSuccess.Set(float64(time.Now().Unix()))
 }
 
 // IncEtcdError increments the etcd operation-error counter.

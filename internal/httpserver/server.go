@@ -1,4 +1,4 @@
-package health
+package httpserver
 
 import (
 	"context"
@@ -44,7 +44,7 @@ func Handler(status *Status, metricsHandler http.Handler) http.Handler {
 	return mux
 }
 
-// Server is the auxiliary HTTP server exposing the health endpoints.
+// Server is the auxiliary HTTP server exposing the health and metrics endpoints.
 type Server struct {
 	srv      *http.Server
 	listener net.Listener
@@ -58,7 +58,7 @@ type Server struct {
 func NewServer(addr string, status *Status, metricsHandler http.Handler, logger zerolog.Logger) (*Server, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
-		return nil, fmt.Errorf("bind health server on %q: %w", addr, err)
+		return nil, fmt.Errorf("bind HTTP server on %q: %w", addr, err)
 	}
 	return &Server{
 		srv: &http.Server{
@@ -78,14 +78,14 @@ func (s *Server) Start(ctx context.Context) {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.srv.Shutdown(shutdownCtx); err != nil {
-			s.logger.Error().Err(err).Msg("error shutting down health server")
+			s.logger.Error().Err(err).Msg("error shutting down HTTP server")
 		}
 	}()
 	go func() {
-		s.logger.Info().Str("addr", s.listener.Addr().String()).Msg("Starting health/readiness server")
+		s.logger.Info().Str("addr", s.listener.Addr().String()).Msg("Starting auxiliary HTTP server")
 		if err := s.srv.Serve(s.listener); err != nil &&
 			!errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
-			s.logger.Error().Err(err).Msg("health server error")
+			s.logger.Error().Err(err).Msg("HTTP server error")
 		}
 	}()
 }

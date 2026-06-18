@@ -1,19 +1,15 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net"
-	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
-	"github.com/auto-dns/docker-coredns-sync/internal/health"
-	"github.com/auto-dns/docker-coredns-sync/internal/metrics"
 	dockerCli "github.com/docker/docker/client"
 	"github.com/rs/zerolog"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -106,7 +102,7 @@ func TestNewWithFactories_DryRunReadiness(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Free the bound health port without closing the (empty) real clients.
-	defer app.healthServer.Close()
+	defer app.httpServer.Close()
 
 	if app.status == nil {
 		t.Fatal("expected health status to be wired when HTTP is enabled")
@@ -135,44 +131,37 @@ func TestNewWithFactories_MetricsEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if app.healthServer == nil {
+	if app.httpServer == nil {
 		t.Fatal("expected HTTP server to be created when metrics is enabled")
 	}
-	defer app.healthServer.Close()
+	defer app.httpServer.Close()
 	if app.status != nil {
 		t.Error("expected no health status when http.enabled is false")
 	}
 }
 
-func TestConnectionObserver_CountsOnlyTrueToFalse(t *testing.T) {
-	m := metrics.New()
-	status := health.NewStatus(time.Minute)
-	obs := connectionObserver(status, m)
-	if obs == nil {
-		t.Fatal("expected non-nil observer when sinks are configured")
-	}
-	obs(true)  // connect
-	obs(false) // disconnect -> counts
-	obs(false) // still down -> no count
-	obs(true)  // reconnect
-	obs(false) // disconnect -> counts (total 2)
+func TestNewWithFactories_WarnsPlaintextCredentials(t *testing.T) {
+	cfg := testConfig()
+	cfg.Etcd.Username = "admin"
+	cfg.Etcd.Password = "secret"
+	// Plain http endpoint, no TLS -> credentials would go in plaintext.
+	cfg.Etcd.Endpoints = []string{"http://localhost:2379"}
 
-	srv := httptest.NewServer(m.Handler())
-	defer srv.Close()
-	resp, err := http.Get(srv.URL)
-	if err != nil {
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf)
+
+	factories := ClientFactories{
+		DockerClientFactory: func() (*dockerCli.Client, error) { return &dockerCli.Client{}, nil },
+		EtcdClientFactory: func(ecfg *config.EtcdConfig, dialTimeout time.Duration) (*clientv3.Client, error) {
+			return &clientv3.Client{}, nil
+		},
+	}
+
+	if _, err := NewWithFactories(cfg, logger, factories); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "dcs_docker_disconnects_total 2") {
-		t.Errorf("expected 2 disconnects counted, got body:\n%s", string(body))
-	}
-}
-
-func TestConnectionObserver_NilWhenNoSinks(t *testing.T) {
-	if connectionObserver(nil, nil) != nil {
-		t.Error("expected nil observer when neither sink is configured")
+	if !strings.Contains(buf.String(), "plaintext") {
+		t.Errorf("expected a plaintext-credentials warning, got logs: %s", buf.String())
 	}
 }
 

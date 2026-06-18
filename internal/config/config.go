@@ -83,13 +83,35 @@ func (t EtcdTLSConfig) Configured() bool {
 	return t.CAFile != "" || t.CertFile != "" || t.KeyFile != "" || t.InsecureSkipVerify
 }
 
-// ClientTLS builds a *tls.Config from the configured files. It returns
-// (nil, nil) when no TLS settings are present, so the caller can connect over a
-// plain endpoint unchanged. A client cert/key pair and a CA root are loaded
-// only when their respective files are set.
+// hasHTTPSEndpoint reports whether any configured endpoint uses the https
+// scheme.
+func (c *EtcdConfig) hasHTTPSEndpoint() bool {
+	for _, e := range c.Endpoints {
+		if strings.HasPrefix(e, "https://") {
+			return true
+		}
+	}
+	return false
+}
+
+// UsesTLS reports whether the etcd connection will be encrypted: either TLS is
+// explicitly configured, or at least one endpoint is https://.
+func (c *EtcdConfig) UsesTLS() bool {
+	return c.TLS.Configured() || c.hasHTTPSEndpoint()
+}
+
+// ClientTLS builds a *tls.Config for the etcd connection. When no TLS settings
+// are present it returns (nil, nil) for plain http:// endpoints, but for an
+// https:// endpoint it returns a config that verifies the server against the
+// system root CAs — otherwise the client would silently dial without TLS and
+// fail with an opaque transport error. A client cert/key pair and a CA root are
+// loaded only when their respective files are set.
 func (c *EtcdConfig) ClientTLS() (*tls.Config, error) {
 	t := c.TLS
 	if !t.Configured() {
+		if c.hasHTTPSEndpoint() {
+			return &tls.Config{MinVersion: tls.VersionTLS12}, nil
+		}
 		return nil, nil
 	}
 	cfg := &tls.Config{
@@ -120,6 +142,13 @@ func (c *EtcdConfig) ClientTLS() (*tls.Config, error) {
 // LoggingConfig holds the logging-related configuration.
 type LoggingConfig struct {
 	Level string `mapstructure:"level"`
+}
+
+// HTTPServerEnabled reports whether the auxiliary HTTP server should run, i.e.
+// the health endpoints or the metrics endpoint (or both) are enabled. It is the
+// single source of truth for this decision, used by both validation and startup.
+func (c *Config) HTTPServerEnabled() bool {
+	return c.HTTP.Enabled || c.Metrics.Enabled
 }
 
 // Load initializes, loads, and validates the config in one public call.
@@ -230,6 +259,9 @@ func (c *Config) validate() error {
 	if (c.Etcd.TLS.CertFile == "") != (c.Etcd.TLS.KeyFile == "") {
 		return fmt.Errorf("etcd.tls.cert_file and etcd.tls.key_file must be provided together")
 	}
+	if c.Etcd.TLS.InsecureSkipVerify && c.Etcd.TLS.CAFile != "" {
+		return fmt.Errorf("etcd.tls.insecure_skip_verify cannot be combined with etcd.tls.ca_file: the CA would be ignored, giving a false sense of verification")
+	}
 	if c.Etcd.Username != "" && c.Etcd.Password == "" {
 		return fmt.Errorf("etcd.password must be set when etcd.username is provided")
 	}
@@ -248,7 +280,7 @@ func (c *Config) validate() error {
 	if _, ok := validLevels[strings.ToUpper(c.Logging.Level)]; !ok {
 		return fmt.Errorf("log.level must be a valid log level, got: %s", c.Logging.Level)
 	}
-	if (c.HTTP.Enabled || c.Metrics.Enabled) && strings.TrimSpace(c.HTTP.ListenAddr) == "" {
+	if c.HTTPServerEnabled() && strings.TrimSpace(c.HTTP.ListenAddr) == "" {
 		return fmt.Errorf("http.listen_addr cannot be empty when http.enabled or metrics.enabled is true")
 	}
 	if c.Docker.EventBufferSize <= 0 {

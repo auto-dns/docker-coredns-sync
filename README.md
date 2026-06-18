@@ -209,12 +209,13 @@ Exposed series (all prefixed `dcs_`):
 - `dcs_reconcile_duration_seconds` — histogram of reconciliation-pass duration.
 - `dcs_reconcile_last_success_timestamp_seconds` — Unix time of the last
   successful reconciliation.
-- `dcs_reconcile_total{result="success|error"}` — reconciliation passes by
-  result.
-- `dcs_records_added_total` / `dcs_records_removed_total` — records written to
-  or removed from etcd.
-- `dcs_records_skipped_total` — desired records dropped during conflict
-  filtering.
+- `dcs_reconcile_total{result="success|error|dry_run"}` — reconciliation passes
+  by result. Dry-run passes are counted as `dry_run` and never refresh the
+  last-success gauge.
+- `dcs_records_added_total` / `dcs_records_removed_total` — cumulative records
+  written to or removed from etcd.
+- `dcs_records_skipped` — gauge of desired records dropped during conflict
+  filtering on the most recent pass (steady-state, not cumulative).
 - `dcs_etcd_errors_total` / `dcs_etcd_lock_failures_total` — etcd operation
   errors and lock-acquisition failures.
 - `dcs_docker_disconnects_total` — Docker event-stream disconnects.

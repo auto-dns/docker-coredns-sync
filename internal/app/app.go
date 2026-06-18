@@ -11,7 +11,7 @@ import (
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
 	"github.com/auto-dns/docker-coredns-sync/internal/core"
 	"github.com/auto-dns/docker-coredns-sync/internal/event"
-	"github.com/auto-dns/docker-coredns-sync/internal/health"
+	"github.com/auto-dns/docker-coredns-sync/internal/httpserver"
 	"github.com/auto-dns/docker-coredns-sync/internal/metrics"
 	"github.com/auto-dns/docker-coredns-sync/internal/registry"
 	"github.com/auto-dns/docker-coredns-sync/internal/state"
@@ -24,8 +24,8 @@ type App struct {
 	dockerClient io.Closer
 	etcdClient   io.Closer
 	engine       *core.SyncEngine
-	healthServer *health.Server
-	status       *health.Status
+	httpServer   *httpserver.Server
+	status       *httpserver.Status
 	logger       zerolog.Logger
 }
 
@@ -58,32 +58,15 @@ func DefaultFactories() ClientFactories {
 	}
 }
 
-// connectionObserver builds the Docker connection-state callback that feeds the
-// health status and/or the disconnect metric. It returns nil when neither sink
-// is configured. The callback runs inline on the generator's single goroutine,
-// so its transition tracking needs no synchronization. Only true->false
-// transitions count as disconnects, so the initial state and a clean shutdown
-// are not miscounted.
-func connectionObserver(status *health.Status, m *metrics.Metrics) func(bool) {
-	if status == nil && m == nil {
-		return nil
-	}
-	prevConnected := false
-	return func(connected bool) {
-		if status != nil {
-			status.SetDockerConnected(connected)
-		}
-		if m != nil && prevConnected && !connected {
-			m.IncDockerDisconnect()
-		}
-		prevConnected = connected
-	}
-}
-
 func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories ClientFactories) (*App, error) {
 	dockerClient, err := factories.DockerClientFactory()
 	if err != nil {
 		return nil, err
+	}
+
+	// Warn when etcd credentials would be sent over an unencrypted connection.
+	if cfg.Etcd.Username != "" && !cfg.Etcd.UsesTLS() {
+		logger.Warn().Msg("etcd username/password configured without TLS or an https:// endpoint: credentials will be sent in plaintext")
 	}
 
 	// metrics is created when the /metrics endpoint is enabled; it is fed by the
@@ -96,12 +79,12 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 
 	// Status backs the health endpoints; it is shared by the engine (reconcile
 	// outcomes) and the Docker generator (connection state).
-	var status *health.Status
+	var status *httpserver.Status
 	if cfg.HTTP.Enabled {
 		// Consider the daemon stale if a reconciliation has not succeeded within
 		// a few poll intervals.
 		readyThreshold := 3 * time.Duration(cfg.App.PollInterval) * time.Second
-		status = health.NewStatus(readyThreshold)
+		status = httpserver.NewStatus(readyThreshold)
 	}
 
 	genOpts := []event.Option{
@@ -111,8 +94,13 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 			time.Duration(cfg.Docker.ReconnectMaxBackoff*float64(time.Second)),
 		),
 	}
-	if obs := connectionObserver(status, m); obs != nil {
-		genOpts = append(genOpts, event.WithConnectionObserver(obs))
+	// Health tracks the full connection state; metrics counts only genuine
+	// disconnects (the generator excludes clean shutdown and failed connects).
+	if status != nil {
+		genOpts = append(genOpts, event.WithConnectionObserver(status.SetDockerConnected))
+	}
+	if m != nil {
+		genOpts = append(genOpts, event.WithDisconnectObserver(m.IncDockerDisconnect))
 	}
 	gen := event.NewDockerGenerator(dockerClient, logger, genOpts...)
 
@@ -128,9 +116,6 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 	}
 	memState := state.NewMemoryState()
 	engine := core.NewSyncEngine(logger, &cfg.App, gen, reg, memState)
-	if m != nil {
-		engine.SetMetrics(m)
-	}
 
 	app := &App{
 		dockerClient: dockerClient,
@@ -139,31 +124,35 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 		logger:       logger,
 	}
 
+	// In dry-run the daemon intentionally writes nothing, so neither readiness
+	// nor metrics should report it as a ready, successfully-syncing instance.
+	if cfg.App.DryRun {
+		logger.Warn().Msg("dry-run enabled: no records are applied; readiness reports not-ready")
+	}
+	if m != nil {
+		engine.SetMetrics(m)
+		m.SetDryRun(cfg.App.DryRun)
+	}
 	if status != nil {
-		// In dry-run the daemon intentionally writes nothing, so it never
-		// reports itself as a ready, authoritative syncer.
-		if cfg.App.DryRun {
-			status.SetDryRun(true)
-			logger.Warn().Msg("dry-run enabled: readiness will report not-ready (no records are applied)")
-		}
+		status.SetDryRun(cfg.App.DryRun)
 		engine.SetReconcileReporter(status)
 		app.status = status
 	}
 
 	// Start the shared HTTP server when either the health endpoints or the
 	// metrics endpoint is enabled.
-	if cfg.HTTP.Enabled || cfg.Metrics.Enabled {
+	if cfg.HTTPServerEnabled() {
 		var metricsHandler http.Handler
 		if m != nil {
 			metricsHandler = m.Handler()
 		}
-		healthServer, err := health.NewServer(cfg.HTTP.ListenAddr, status, metricsHandler, logger)
+		httpServer, err := httpserver.NewServer(cfg.HTTP.ListenAddr, status, metricsHandler, logger)
 		if err != nil {
 			_ = dockerClient.Close()
 			_ = etcdClient.Close()
 			return nil, err
 		}
-		app.healthServer = healthServer
+		app.httpServer = httpServer
 	}
 
 	return app, nil
@@ -178,8 +167,8 @@ var _ io.Closer = (*App)(nil)
 // Run starts the application by running the sync engine.
 func (a *App) Run(ctx context.Context) error {
 	a.logger.Info().Msg("Application starting")
-	if a.healthServer != nil {
-		a.healthServer.Start(ctx)
+	if a.httpServer != nil {
+		a.httpServer.Start(ctx)
 	}
 	return a.engine.Run(ctx)
 }
@@ -197,9 +186,9 @@ func (a *App) Close() error {
 			err = errors.Join(err, fmt.Errorf("close etcd client: %w", e))
 		}
 	}
-	if a.healthServer != nil {
-		if e := a.healthServer.Close(); e != nil {
-			err = errors.Join(err, fmt.Errorf("close health server: %w", e))
+	if a.httpServer != nil {
+		if e := a.httpServer.Close(); e != nil {
+			err = errors.Join(err, fmt.Errorf("close HTTP server: %w", e))
 		}
 	}
 

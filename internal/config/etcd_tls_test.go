@@ -100,6 +100,73 @@ func TestClientTLS_WithCertKeyAndCA(t *testing.T) {
 	}
 }
 
+func TestClientTLS_HTTPSWithoutTLSUsesSystemRoots(t *testing.T) {
+	cfg := &EtcdConfig{Endpoints: []string{"https://etcd.example.com:2379"}}
+	got, err := cfg.ClientTLS()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected a non-nil tls.Config for an https endpoint with no explicit TLS settings")
+	}
+	if got.RootCAs != nil {
+		t.Error("expected RootCAs to be nil (system roots) when no CA file is given")
+	}
+	if got.InsecureSkipVerify {
+		t.Error("expected verification to remain enabled for an https endpoint")
+	}
+}
+
+func TestClientTLS_HTTPEndpointStaysPlain(t *testing.T) {
+	cfg := &EtcdConfig{Endpoints: []string{"http://localhost:2379"}}
+	got, err := cfg.ClientTLS()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil tls.Config for a plain http endpoint, got %+v", got)
+	}
+}
+
+func TestEtcdConfig_UsesTLS(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  EtcdConfig
+		want bool
+	}{
+		{"plain http", EtcdConfig{Endpoints: []string{"http://localhost:2379"}}, false},
+		{"https endpoint", EtcdConfig{Endpoints: []string{"https://localhost:2379"}}, true},
+		{"tls configured", EtcdConfig{Endpoints: []string{"http://localhost:2379"}, TLS: EtcdTLSConfig{CAFile: "ca.pem"}}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.UsesTLS(); got != tc.want {
+				t.Errorf("UsesTLS() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestConfig_Validate_InsecureSkipVerifyWithCA(t *testing.T) {
+	cfg := validConfig()
+	cfg.Etcd.TLS.InsecureSkipVerify = true
+	cfg.Etcd.TLS.CAFile = "ca.pem"
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error when insecure_skip_verify is combined with ca_file")
+	}
+}
+
+func TestConfig_HTTPServerEnabled(t *testing.T) {
+	cfg := validConfig()
+	if cfg.HTTPServerEnabled() {
+		t.Error("expected HTTPServerEnabled false by default")
+	}
+	cfg.Metrics.Enabled = true
+	if !cfg.HTTPServerEnabled() {
+		t.Error("expected HTTPServerEnabled true when metrics is enabled")
+	}
+}
+
 func TestClientTLS_InsecureSkipVerifyOnly(t *testing.T) {
 	cfg := &EtcdConfig{TLS: EtcdTLSConfig{InsecureSkipVerify: true}}
 	got, err := cfg.ClientTLS()

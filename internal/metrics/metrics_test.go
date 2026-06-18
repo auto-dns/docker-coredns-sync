@@ -23,13 +23,39 @@ func TestObserveReconcile_Success(t *testing.T) {
 		t.Errorf("records removed = %v, want 1", got)
 	}
 	if got := testutil.ToFloat64(m.recordsSkipped); got != 3 {
-		t.Errorf("records skipped = %v, want 3", got)
+		t.Errorf("records skipped gauge = %v, want 3", got)
 	}
 	if got := testutil.ToFloat64(m.reconcileTotal.WithLabelValues("success")); got != 1 {
 		t.Errorf("reconcile success total = %v, want 1", got)
 	}
 	if got := testutil.ToFloat64(m.lastReconcileSuccess); got <= 0 {
 		t.Errorf("last success timestamp = %v, want > 0", got)
+	}
+}
+
+func TestObserveReconcile_SkippedIsGaugeNotCumulative(t *testing.T) {
+	m := New()
+	m.ObserveReconcile(time.Millisecond, 0, 0, 5, nil)
+	m.ObserveReconcile(time.Millisecond, 0, 0, 2, nil)
+	// A gauge reflects the most recent pass, not the sum (which would be 7).
+	if got := testutil.ToFloat64(m.recordsSkipped); got != 2 {
+		t.Errorf("skipped gauge = %v, want 2 (latest pass, not cumulative)", got)
+	}
+}
+
+func TestObserveReconcile_DryRunNotSuccess(t *testing.T) {
+	m := New()
+	m.SetDryRun(true)
+	m.ObserveReconcile(time.Millisecond, 0, 0, 0, nil)
+
+	if got := testutil.ToFloat64(m.reconcileTotal.WithLabelValues("dry_run")); got != 1 {
+		t.Errorf("dry_run total = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(m.reconcileTotal.WithLabelValues("success")); got != 0 {
+		t.Errorf("success total = %v, want 0 in dry-run", got)
+	}
+	if got := testutil.ToFloat64(m.lastReconcileSuccess); got != 0 {
+		t.Errorf("last success timestamp = %v, want 0 (never refreshed in dry-run)", got)
 	}
 }
 
