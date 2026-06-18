@@ -54,6 +54,11 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 		return nil, err
 	}
 	gen := event.NewDockerGenerator(dockerClient, logger)
+	gen.SetEventBufferSize(cfg.Docker.EventBufferSize)
+	gen.SetReconnectBackoff(
+		time.Duration(cfg.Docker.ReconnectInitialBackoff*float64(time.Second)),
+		time.Duration(cfg.Docker.ReconnectMaxBackoff*float64(time.Second)),
+	)
 
 	etcdClient, err := factories.EtcdClientFactory(cfg.Etcd.Endpoints, 2*time.Second)
 	if err != nil {

@@ -27,6 +27,11 @@ func validConfig() *Config {
 		Logging: LoggingConfig{
 			Level: "INFO",
 		},
+		Docker: DockerConfig{
+			EventBufferSize:         100,
+			ReconnectInitialBackoff: 1.0,
+			ReconnectMaxBackoff:     30.0,
+		},
 	}
 }
 
@@ -226,6 +231,39 @@ func TestConfig_Validate_EmptyPathPrefix(t *testing.T) {
 
 	if err == nil {
 		t.Error("expected error for empty PathPrefix")
+	}
+}
+
+func TestConfig_Validate_HTTPEnabledRequiresListenAddr(t *testing.T) {
+	cfg := validConfig()
+	cfg.HTTP.Enabled = true
+	cfg.HTTP.ListenAddr = ""
+
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error when http.enabled is true but listen_addr is empty")
+	}
+}
+
+func TestConfig_Validate_InvalidEventBufferSize(t *testing.T) {
+	cfg := validConfig()
+	cfg.Docker.EventBufferSize = 0
+
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error for non-positive docker.event_buffer_size")
+	}
+}
+
+func TestConfig_Validate_InvalidReconnectBackoff(t *testing.T) {
+	cfg := validConfig()
+	cfg.Docker.ReconnectInitialBackoff = 0
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error for non-positive reconnect_initial_backoff")
+	}
+
+	cfg = validConfig()
+	cfg.Docker.ReconnectMaxBackoff = cfg.Docker.ReconnectInitialBackoff - 0.5
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error when reconnect_max_backoff < reconnect_initial_backoff")
 	}
 }
 

@@ -16,6 +16,15 @@ type Config struct {
 	Etcd    EtcdConfig    `mapstructure:"etcd"`
 	Logging LoggingConfig `mapstructure:"log"`
 	HTTP    HTTPConfig    `mapstructure:"http"`
+	Docker  DockerConfig  `mapstructure:"docker"`
+}
+
+// DockerConfig configures the Docker event subscription, including the
+// reconnect behavior when the event stream drops.
+type DockerConfig struct {
+	EventBufferSize         int     `mapstructure:"event_buffer_size"`
+	ReconnectInitialBackoff float64 `mapstructure:"reconnect_initial_backoff"` // seconds
+	ReconnectMaxBackoff     float64 `mapstructure:"reconnect_max_backoff"`     // seconds
 }
 
 // HTTPConfig configures the auxiliary HTTP server that serves health/readiness
@@ -107,6 +116,9 @@ func initConfig() error {
 	viper.SetDefault("log.level", "INFO")
 	viper.SetDefault("http.enabled", false)
 	viper.SetDefault("http.listen_addr", ":8080")
+	viper.SetDefault("docker.event_buffer_size", 100)
+	viper.SetDefault("docker.reconnect_initial_backoff", 1.0)
+	viper.SetDefault("docker.reconnect_max_backoff", 30.0)
 
 	// Read config file if it exists
 	if err := viper.ReadInConfig(); err != nil {
@@ -163,6 +175,15 @@ func (c *Config) validate() error {
 	}
 	if c.HTTP.Enabled && strings.TrimSpace(c.HTTP.ListenAddr) == "" {
 		return fmt.Errorf("http.listen_addr cannot be empty when http.enabled is true")
+	}
+	if c.Docker.EventBufferSize <= 0 {
+		return fmt.Errorf("docker.event_buffer_size must be greater than 0")
+	}
+	if c.Docker.ReconnectInitialBackoff <= 0 {
+		return fmt.Errorf("docker.reconnect_initial_backoff must be greater than 0")
+	}
+	if c.Docker.ReconnectMaxBackoff < c.Docker.ReconnectInitialBackoff {
+		return fmt.Errorf("docker.reconnect_max_backoff must be >= docker.reconnect_initial_backoff")
 	}
 	return nil
 }
