@@ -20,6 +20,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- `CONTRIBUTING.md` documenting versioning, branch, tag/release, issue, and
+  pull-request conventions; a pull request template; and a workflow that labels
+  issues `awaiting-release` when their PR merges into a release branch.
 - Dry-run mode (`app.dry_run` / `--app.dry-run`): the reconciliation loop logs
   the planned add/remove set and makes no changes to etcd. (#10)
 - Health and readiness HTTP endpoints (`http.enabled`, `http.listen_addr`):
