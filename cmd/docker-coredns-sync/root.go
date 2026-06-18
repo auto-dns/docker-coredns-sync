@@ -115,6 +115,24 @@ func init() {
 	rootCmd.PersistentFlags().String("etcd.path-prefix", "", "etcd key path prefix (e.g., /skydns)")
 	viper.BindPFlag("etcd.path_prefix", rootCmd.PersistentFlags().Lookup("etcd.path-prefix"))
 
+	rootCmd.PersistentFlags().String("etcd.username", "", "Username for etcd authentication")
+	viper.BindPFlag("etcd.username", rootCmd.PersistentFlags().Lookup("etcd.username"))
+
+	rootCmd.PersistentFlags().String("etcd.password", "", "Password for etcd authentication")
+	viper.BindPFlag("etcd.password", rootCmd.PersistentFlags().Lookup("etcd.password"))
+
+	rootCmd.PersistentFlags().String("etcd.tls.ca-file", "", "Path to the CA certificate for the etcd connection")
+	viper.BindPFlag("etcd.tls.ca_file", rootCmd.PersistentFlags().Lookup("etcd.tls.ca-file"))
+
+	rootCmd.PersistentFlags().String("etcd.tls.cert-file", "", "Path to the client certificate for the etcd connection")
+	viper.BindPFlag("etcd.tls.cert_file", rootCmd.PersistentFlags().Lookup("etcd.tls.cert-file"))
+
+	rootCmd.PersistentFlags().String("etcd.tls.key-file", "", "Path to the client key for the etcd connection")
+	viper.BindPFlag("etcd.tls.key_file", rootCmd.PersistentFlags().Lookup("etcd.tls.key-file"))
+
+	rootCmd.PersistentFlags().Bool("etcd.tls.insecure-skip-verify", false, "Skip verification of the etcd server certificate (insecure)")
+	viper.BindPFlag("etcd.tls.insecure_skip_verify", rootCmd.PersistentFlags().Lookup("etcd.tls.insecure-skip-verify"))
+
 	rootCmd.PersistentFlags().Float64("etcd.lock-ttl", 0, "TTL (in seconds) for etcd locks")
 	viper.BindPFlag("etcd.lock_ttl", rootCmd.PersistentFlags().Lookup("etcd.lock-ttl"))
 
@@ -134,6 +152,10 @@ func init() {
 
 	rootCmd.PersistentFlags().String("http.listen-addr", "", "Listen address for the HTTP server (e.g., :8080)")
 	viper.BindPFlag("http.listen_addr", rootCmd.PersistentFlags().Lookup("http.listen-addr"))
+
+	// MetricsConfig Flag
+	rootCmd.PersistentFlags().Bool("metrics.enabled", false, "Expose the Prometheus /metrics endpoint on the HTTP server")
+	viper.BindPFlag("metrics.enabled", rootCmd.PersistentFlags().Lookup("metrics.enabled"))
 }
 
 // Execute runs the root command.

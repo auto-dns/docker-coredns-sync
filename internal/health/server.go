@@ -11,25 +11,36 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// Handler returns the HTTP handler serving the health and readiness endpoints:
+// Handler returns the HTTP handler for the auxiliary server. The registered
+// routes depend on which features are enabled:
+//   - When status is non-nil:
 //   - GET /healthz — liveness; always 200 while the process is running.
 //   - GET /readyz  — readiness; 200 when Status.Ready(), else 503 with reason.
-func Handler(status *Status) http.Handler {
+//   - When metricsHandler is non-nil:
+//   - GET /metrics — Prometheus exposition.
+//
+// Either argument may be nil; at least one is expected to be set by the caller.
+func Handler(status *Status, metricsHandler http.Handler) http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		ready, reason := status.Ready()
-		if !ready {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte(reason))
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	if status != nil {
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		})
+		mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+			ready, reason := status.Ready()
+			if !ready {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(reason))
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		})
+	}
+	if metricsHandler != nil {
+		mux.Handle("/metrics", metricsHandler)
+	}
 	return mux
 }
 
@@ -40,17 +51,18 @@ type Server struct {
 	logger   zerolog.Logger
 }
 
-// NewServer binds a health server to addr. Binding happens synchronously so a
-// bad or in-use address fails fast at startup rather than silently leaving the
-// endpoints unavailable.
-func NewServer(addr string, status *Status, logger zerolog.Logger) (*Server, error) {
+// NewServer binds the auxiliary HTTP server to addr. Binding happens
+// synchronously so a bad or in-use address fails fast at startup rather than
+// silently leaving the endpoints unavailable. status and metricsHandler are
+// passed through to Handler; either may be nil.
+func NewServer(addr string, status *Status, metricsHandler http.Handler, logger zerolog.Logger) (*Server, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("bind health server on %q: %w", addr, err)
 	}
 	return &Server{
 		srv: &http.Server{
-			Handler:           Handler(status),
+			Handler:           Handler(status, metricsHandler),
 			ReadHeaderTimeout: 5 * time.Second,
 		},
 		listener: ln,

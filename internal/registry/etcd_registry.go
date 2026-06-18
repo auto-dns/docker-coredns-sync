@@ -15,11 +15,19 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+// registryMetrics is an optional sink for etcd operation metrics. Implementations
+// must be safe for concurrent use.
+type registryMetrics interface {
+	IncEtcdError()
+	IncLockFailure()
+}
+
 type EtcdRegistry struct {
 	client   etcdClient
 	cfg      *config.EtcdConfig
 	hostname string
 	logger   zerolog.Logger
+	metrics  registryMetrics
 }
 
 func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string, logger zerolog.Logger) *EtcdRegistry {
@@ -31,6 +39,24 @@ func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string,
 	}
 }
 
+// SetMetrics registers an optional sink for etcd operation/lock metrics. Safe
+// to leave unset.
+func (er *EtcdRegistry) SetMetrics(m registryMetrics) {
+	er.metrics = m
+}
+
+func (er *EtcdRegistry) incEtcdError() {
+	if er.metrics != nil {
+		er.metrics.IncEtcdError()
+	}
+}
+
+func (er *EtcdRegistry) incLockFailure() {
+	if er.metrics != nil {
+		er.metrics.IncLockFailure()
+	}
+}
+
 // getNextIndexedKey generates a new etcd key for a record based on its fully qualified domain name (fqdn).
 func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (string, error) {
 	base := keyBaseForFQDN(er.cfg.PathPrefix, fqdn)
@@ -38,6 +64,7 @@ func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (str
 
 	resp, err := er.client.Get(ctx, base, clientv3.WithPrefix(), clientv3.WithKeysOnly(), clientv3.WithSerializable())
 	if err != nil {
+		er.incEtcdError()
 		return "", fmt.Errorf("list existing indices under %q: %w", base, err)
 	}
 	for _, kv := range resp.Kvs {
@@ -76,6 +103,7 @@ func (er *EtcdRegistry) Register(ctx context.Context, ri *domain.RecordIntent) e
 		return fmt.Errorf("marshal etcd value for %q: %w", fqdn, err)
 	}
 	if _, err := er.client.Put(ctx, key, value); err != nil {
+		er.incEtcdError()
 		return fmt.Errorf("put key %q: %w", key, err)
 	}
 	er.logger.Info().Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).Str("owner_container_id", ri.ContainerId).Str("key", key).Msg("registered record")
@@ -96,6 +124,7 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *domain.RecordIntent) err
 
 	resp, err := er.client.Get(ctx, base, clientv3.WithPrefix())
 	if err != nil {
+		er.incEtcdError()
 		return fmt.Errorf("list keys under base %q: %w", base, err)
 	}
 
@@ -143,6 +172,7 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *domain.RecordIntent) err
 			ops = append(ops, clientv3.OpDelete(k))
 		}
 		if _, err := txn.Then(ops...).Commit(); err != nil {
+			er.incEtcdError()
 			er.logger.Warn().Err(err).Int("batch_start", i).Int("batch_end", end).Msg("remove: batch delete failed")
 			if firstErr == nil {
 				firstErr = fmt.Errorf("batch delete [%d:%d]: %w", i, end, err)
@@ -162,6 +192,7 @@ func (er *EtcdRegistry) List(ctx context.Context) ([]*domain.RecordIntent, error
 	prefix := er.cfg.PathPrefix
 	resp, err := er.client.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
 	if err != nil {
+		er.incEtcdError()
 		return nil, fmt.Errorf("list under prefix %q: %w", prefix, err)
 	}
 	intents := make([]*domain.RecordIntent, 0, len(resp.Kvs))
@@ -197,6 +228,7 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 		lockKey := fmt.Sprintf("/locks/%s", key)
 		leaseResp, err := er.client.Grant(ctx, int64(er.cfg.LockTTL))
 		if err != nil {
+			er.incEtcdError()
 			return fmt.Errorf("failed to create lease: %w", err)
 		}
 		acquired := false
@@ -213,6 +245,7 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 				Then(clientv3.OpPut(lockKey, er.hostname, clientv3.WithLease(leaseResp.ID))).
 				Commit()
 			if err != nil {
+				er.incEtcdError()
 				return fmt.Errorf("acquire lock %q: %w", lockKey, err)
 			}
 			if txnResp.Succeeded {
@@ -222,6 +255,7 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 				kaCtx, cancel := context.WithCancel(ctx)
 				kaCh, err := er.client.KeepAlive(kaCtx, leaseResp.ID)
 				if err != nil {
+					er.incEtcdError()
 					cancel()
 					// best-effort cleanup
 					_, _ = er.client.Delete(ctx, lockKey)
@@ -242,6 +276,7 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 			time.Sleep(time.Duration(er.cfg.LockRetryInterval * float64(time.Second)))
 		}
 		if !acquired {
+			er.incLockFailure()
 			if _, e := er.client.Revoke(ctx, leaseResp.ID); e != nil {
 				er.logger.Warn().Err(e).Str("lock", lockKey).Msg("revoke unused lease after acquire timeout")
 			}

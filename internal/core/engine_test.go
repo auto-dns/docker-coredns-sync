@@ -925,6 +925,89 @@ func TestSyncEngine_Run_ReportsReconcileResult(t *testing.T) {
 	}
 }
 
+type recordingMetrics struct {
+	mu      sync.Mutex
+	calls   int
+	added   int
+	removed int
+	skipped int
+	sawErr  bool
+}
+
+func (r *recordingMetrics) ObserveReconcile(_ time.Duration, added, removed, skipped int, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	r.added += added
+	r.removed += removed
+	r.skipped += skipped
+	if err != nil {
+		r.sawErr = true
+	}
+}
+
+func (r *recordingMetrics) snapshot() (calls, added, removed, skipped int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls, r.added, r.removed, r.skipped
+}
+
+func TestSyncEngine_Run_RecordsMetrics(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+
+	rec, _ := domain.NewA("app.example.com", "192.168.1.1")
+	desiredIntents := []*domain.RecordIntent{
+		{
+			ContainerId:   "container-123",
+			ContainerName: "my-app",
+			Created:       time.Now(),
+			Hostname:      "test-host",
+			Record:        rec,
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return desiredIntents
+		},
+	}
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{}, nil
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+
+	m := &recordingMetrics{}
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+	engine.SetMetrics(m)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() { engine.Run(ctx) }()
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	calls, added, _, _ := m.snapshot()
+	if calls == 0 {
+		t.Fatal("expected ObserveReconcile to be called at least once")
+	}
+	if added < 1 {
+		t.Errorf("expected at least one record counted as added, got %d", added)
+	}
+	if m.sawErr {
+		t.Error("expected no reconcile error to be reported to metrics")
+	}
+}
+
 func TestSyncEngine_Run_EventChannelClosed(t *testing.T) {
 	eventCh := make(chan domain.ContainerEvent)
 

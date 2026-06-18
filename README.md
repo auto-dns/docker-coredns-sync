@@ -12,6 +12,8 @@
 - Automatically removes stale records
 - Auto-reconnects to the Docker event stream with backoff if it drops
 - Optional health/readiness HTTP endpoints (`/healthz`, `/readyz`)
+- Optional Prometheus metrics endpoint (`/metrics`)
+- etcd authentication and TLS (incl. mutual TLS) support
 - Dry-run mode to preview changes without writing to etcd
 - Graceful shutdown support
 - Flexible configuration via **flags**, **env vars**, and **config file**
@@ -103,12 +105,19 @@ Configuration values can be provided via:
 | `--app.dry-run` | `app.dry_run` | `DOCKER_COREDNS_SYNC_APP_DRY_RUN` | `bool` | `false` | Log planned etcd changes without applying them |
 | *(config file only)* | `etcd.endpoints` | `DOCKER_COREDNS_SYNC_ETCD_ENDPOINTS` | `[]string` | `["http://localhost:2379"]` | etcd endpoint URLs (supports multiple for cluster) |
 | `--etcd.path-prefix` | `etcd.path_prefix` | `DOCKER_COREDNS_SYNC_ETCD_PATH_PREFIX` | `string` | `"/skydns"` | etcd base path |
+| `--etcd.username` | `etcd.username` | `DOCKER_COREDNS_SYNC_ETCD_USERNAME` | `string` | `""` | Username for etcd authentication (requires `etcd.password`) |
+| `--etcd.password` | `etcd.password` | `DOCKER_COREDNS_SYNC_ETCD_PASSWORD` | `string` | `""` | Password for etcd authentication |
+| `--etcd.tls.ca-file` | `etcd.tls.ca_file` | `DOCKER_COREDNS_SYNC_ETCD_TLS_CA_FILE` | `string` | `""` | CA certificate (PEM) used to verify the etcd server |
+| `--etcd.tls.cert-file` | `etcd.tls.cert_file` | `DOCKER_COREDNS_SYNC_ETCD_TLS_CERT_FILE` | `string` | `""` | Client certificate (PEM) for mutual TLS (requires `key_file`) |
+| `--etcd.tls.key-file` | `etcd.tls.key_file` | `DOCKER_COREDNS_SYNC_ETCD_TLS_KEY_FILE` | `string` | `""` | Client private key (PEM) for mutual TLS (requires `cert_file`) |
+| `--etcd.tls.insecure-skip-verify` | `etcd.tls.insecure_skip_verify` | `DOCKER_COREDNS_SYNC_ETCD_TLS_INSECURE_SKIP_VERIFY` | `bool` | `false` | Skip etcd server certificate verification (insecure) |
 | `--etcd.lock-ttl` | `etcd.lock_ttl` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TTL` | `float` | `5.0` | Lock lease time-to-live in seconds |
 | `--etcd.lock-timeout` | `etcd.lock_timeout` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TIMEOUT` | `float` | `2.0` | Lock acquisition timeout |
 | `--etcd.lock-retry-interval` | `etcd.lock_retry_interval` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_RETRY_INTERVAL` | `float` | `0.1` | Retry interval for lock acquisition |
 | `--log.level` | `log.level` | `DOCKER_COREDNS_SYNC_LOG_LEVEL` | `string` | `"INFO"` | Logging level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`) |
 | `--http.enabled` | `http.enabled` | `DOCKER_COREDNS_SYNC_HTTP_ENABLED` | `bool` | `false` | Enable the HTTP server for health/readiness endpoints |
-| `--http.listen-addr` | `http.listen_addr` | `DOCKER_COREDNS_SYNC_HTTP_LISTEN_ADDR` | `string` | `":8080"` | Listen address for the HTTP server |
+| `--http.listen-addr` | `http.listen_addr` | `DOCKER_COREDNS_SYNC_HTTP_LISTEN_ADDR` | `string` | `":8080"` | Listen address for the HTTP server (shared by health and metrics) |
+| `--metrics.enabled` | `metrics.enabled` | `DOCKER_COREDNS_SYNC_METRICS_ENABLED` | `bool` | `false` | Expose the Prometheus `/metrics` endpoint on the HTTP server |
 | *(config file only)* | `docker.event_buffer_size` | `DOCKER_COREDNS_SYNC_DOCKER_EVENT_BUFFER_SIZE` | `int` | `100` | Buffer size for the Docker event channel |
 | *(config file only)* | `docker.reconnect_initial_backoff` | `DOCKER_COREDNS_SYNC_DOCKER_RECONNECT_INITIAL_BACKOFF` | `float` | `1.0` | Initial reconnect backoff (seconds) when the Docker event stream drops |
 | *(config file only)* | `docker.reconnect_max_backoff` | `DOCKER_COREDNS_SYNC_DOCKER_RECONNECT_MAX_BACKOFF` | `float` | `30.0` | Maximum reconnect backoff (seconds) |
@@ -146,13 +155,29 @@ log:
 
 etcd:
   endpoints:
-    - http://192.168.1.10:2379
-    - http://192.168.1.11:2379
-    - http://192.168.1.12:2379
+    - https://192.168.1.10:2379
+    - https://192.168.1.11:2379
+    - https://192.168.1.12:2379
   path_prefix: /skydns
+  # Authentication (optional)
+  username: coredns-sync
+  password: super-secret
+  # TLS (optional; required for any non-loopback etcd over https://)
+  tls:
+    ca_file: /etc/docker-coredns-sync/etcd-ca.pem
+    cert_file: /etc/docker-coredns-sync/etcd-client.pem
+    key_file: /etc/docker-coredns-sync/etcd-client-key.pem
+    insecure_skip_verify: false
   lock_ttl: 5.0
   lock_timeout: 2.0
   lock_retry_interval: 0.1
+
+http:
+  enabled: true
+  listen_addr: ":8080"
+
+metrics:
+  enabled: true
 ```
 
 ---
@@ -168,6 +193,47 @@ When `http.enabled` is `true`, an HTTP server listens on `http.listen_addr`
   intervals, otherwise `503` with a short reason.
 
 These are suitable for container/orchestrator liveness and readiness probes.
+
+---
+
+## Metrics
+
+When `metrics.enabled` is `true`, a Prometheus endpoint is served at `GET
+/metrics` on the same HTTP server as the health endpoints (`http.listen_addr`,
+default `:8080`). The server starts whenever `http.enabled` **or**
+`metrics.enabled` is set, so metrics can be exposed without the health
+endpoints.
+
+Exposed series (all prefixed `dcs_`):
+
+- `dcs_reconcile_duration_seconds` — histogram of reconciliation-pass duration.
+- `dcs_reconcile_last_success_timestamp_seconds` — Unix time of the last
+  successful reconciliation.
+- `dcs_reconcile_total{result="success|error"}` — reconciliation passes by
+  result.
+- `dcs_records_added_total` / `dcs_records_removed_total` — records written to
+  or removed from etcd.
+- `dcs_records_skipped_total` — desired records dropped during conflict
+  filtering.
+- `dcs_etcd_errors_total` / `dcs_etcd_lock_failures_total` — etcd operation
+  errors and lock-acquisition failures.
+- `dcs_docker_disconnects_total` — Docker event-stream disconnects.
+
+---
+
+## etcd Authentication & TLS
+
+For any etcd deployment beyond a trusted loopback, configure authentication
+and/or TLS under `etcd`:
+
+- `etcd.username` / `etcd.password` enable password authentication. A username
+  without a password is rejected at startup.
+- `etcd.tls.ca_file` sets the CA used to verify the etcd server certificate
+  (use this for `https://` endpoints with a private CA).
+- `etcd.tls.cert_file` / `etcd.tls.key_file` enable mutual TLS; both must be
+  provided together or startup fails.
+- `etcd.tls.insecure_skip_verify` disables server certificate verification —
+  for testing only.
 
 ---
 
