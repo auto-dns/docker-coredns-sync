@@ -2,6 +2,8 @@ package health
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"time"
 
@@ -32,24 +34,31 @@ func Handler(status *Status) http.Handler {
 
 // Server is the auxiliary HTTP server exposing the health endpoints.
 type Server struct {
-	srv    *http.Server
-	logger zerolog.Logger
+	srv      *http.Server
+	listener net.Listener
+	logger   zerolog.Logger
 }
 
-// NewServer builds a health server bound to addr.
-func NewServer(addr string, status *Status, logger zerolog.Logger) *Server {
+// NewServer binds a health server to addr. Binding happens synchronously so a
+// bad or in-use address fails fast at startup rather than silently leaving the
+// endpoints unavailable.
+func NewServer(addr string, status *Status, logger zerolog.Logger) (*Server, error) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("bind health server on %q: %w", addr, err)
+	}
 	return &Server{
 		srv: &http.Server{
-			Addr:              addr,
 			Handler:           Handler(status),
 			ReadHeaderTimeout: 5 * time.Second,
 		},
-		logger: logger,
-	}
+		listener: ln,
+		logger:   logger,
+	}, nil
 }
 
-// Start runs the server in the background and shuts it down gracefully when ctx
-// is cancelled.
+// Start serves requests in the background and shuts down gracefully when ctx is
+// cancelled.
 func (s *Server) Start(ctx context.Context) {
 	go func() {
 		<-ctx.Done()
@@ -60,8 +69,8 @@ func (s *Server) Start(ctx context.Context) {
 		}
 	}()
 	go func() {
-		s.logger.Info().Str("addr", s.srv.Addr).Msg("Starting health/readiness server")
-		if err := s.srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		s.logger.Info().Str("addr", s.listener.Addr().String()).Msg("Starting health/readiness server")
+		if err := s.srv.Serve(s.listener); err != nil && err != http.ErrServerClosed {
 			s.logger.Error().Err(err).Msg("health server error")
 		}
 	}()

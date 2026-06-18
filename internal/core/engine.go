@@ -38,6 +38,14 @@ func (se *SyncEngine) SetReconcileReporter(r reconcileReporter) {
 
 func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
 	switch {
+	case evt.EventType == domain.EventTypeResync:
+		running := make(map[string]struct{}, len(evt.RunningContainerIds))
+		for _, id := range evt.RunningContainerIds {
+			running[id] = struct{}{}
+		}
+		if removed := se.state.RetainRunning(running); removed > 0 {
+			se.logger.Info().Int("removed", removed).Msg("Pruned state for containers no longer running after resync")
+		}
 	case evt.Container.Id == "":
 		se.logger.Warn().Str("event_payload", fmt.Sprintf("%+v", evt)).Msg("handled container event with no container id")
 	case !evt.EventType.IsValid():

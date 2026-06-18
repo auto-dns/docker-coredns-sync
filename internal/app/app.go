@@ -53,15 +53,32 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 	if err != nil {
 		return nil, err
 	}
-	gen := event.NewDockerGenerator(dockerClient, logger)
-	gen.SetEventBufferSize(cfg.Docker.EventBufferSize)
-	gen.SetReconnectBackoff(
-		time.Duration(cfg.Docker.ReconnectInitialBackoff*float64(time.Second)),
-		time.Duration(cfg.Docker.ReconnectMaxBackoff*float64(time.Second)),
-	)
+
+	// Status is shared by the engine (reconcile outcomes) and the Docker
+	// generator (connection state), and read by the health endpoints.
+	var status *health.Status
+	if cfg.HTTP.Enabled {
+		// Consider the daemon stale if a reconciliation has not succeeded within
+		// a few poll intervals.
+		readyThreshold := 3 * time.Duration(cfg.App.PollInterval) * time.Second
+		status = health.NewStatus(readyThreshold)
+	}
+
+	genOpts := []event.Option{
+		event.WithEventBufferSize(cfg.Docker.EventBufferSize),
+		event.WithReconnectBackoff(
+			time.Duration(cfg.Docker.ReconnectInitialBackoff*float64(time.Second)),
+			time.Duration(cfg.Docker.ReconnectMaxBackoff*float64(time.Second)),
+		),
+	}
+	if status != nil {
+		genOpts = append(genOpts, event.WithConnectionObserver(status.SetDockerConnected))
+	}
+	gen := event.NewDockerGenerator(dockerClient, logger, genOpts...)
 
 	etcdClient, err := factories.EtcdClientFactory(cfg.Etcd.Endpoints, 2*time.Second)
 	if err != nil {
+		_ = dockerClient.Close()
 		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 
@@ -76,14 +93,21 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 		logger:       logger,
 	}
 
-	if cfg.HTTP.Enabled {
-		// Consider the daemon stale if a reconciliation has not succeeded within
-		// a few poll intervals.
-		readyThreshold := 3 * time.Duration(cfg.App.PollInterval) * time.Second
-		status := health.NewStatus(readyThreshold)
-		engine.SetReconcileReporter(status)
-		gen.SetConnectionObserver(status.SetDockerConnected)
-		app.healthServer = health.NewServer(cfg.HTTP.ListenAddr, status, logger)
+	if status != nil {
+		// In dry-run the daemon intentionally writes nothing, so it should not
+		// report itself as a ready, authoritative syncer.
+		if cfg.App.DryRun {
+			logger.Warn().Msg("dry-run enabled: readiness will report not-ready (no records are applied)")
+		} else {
+			engine.SetReconcileReporter(status)
+		}
+		healthServer, err := health.NewServer(cfg.HTTP.ListenAddr, status, logger)
+		if err != nil {
+			_ = dockerClient.Close()
+			_ = etcdClient.Close()
+			return nil, err
+		}
+		app.healthServer = healthServer
 	}
 
 	return app, nil

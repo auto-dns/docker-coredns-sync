@@ -98,6 +98,39 @@ func TestSyncEngine_handleEvent_InvalidEventType(t *testing.T) {
 	}
 }
 
+func TestSyncEngine_handleEvent_Resync(t *testing.T) {
+	gen := &mockGenerator{}
+	var gotIds map[string]struct{}
+	state := &mockState{
+		retainRunningFunc: func(runningIds map[string]struct{}) int {
+			gotIds = runningIds
+			return 1
+		},
+	}
+	reg := &mockRegistry{}
+	cfg := testAppConfig()
+
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+
+	engine.handleEvent(domain.ContainerEvent{
+		EventType:           domain.EventTypeResync,
+		RunningContainerIds: []string{"a", "b"},
+	})
+
+	if !state.retainRunningCalled {
+		t.Fatal("expected RetainRunning to be called on resync event")
+	}
+	if _, ok := gotIds["a"]; !ok {
+		t.Error("expected running id 'a' in set")
+	}
+	if _, ok := gotIds["b"]; !ok {
+		t.Error("expected running id 'b' in set")
+	}
+	if state.upsertCalled || state.markRemovedCalled {
+		t.Error("resync event should not Upsert or MarkRemoved directly")
+	}
+}
+
 func TestSyncEngine_handleEvent_StartEvent(t *testing.T) {
 	gen := &mockGenerator{}
 	state := &mockState{}

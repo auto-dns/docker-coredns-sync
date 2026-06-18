@@ -31,16 +31,19 @@ type mockState struct {
 	mu                sync.Mutex
 	upsertFunc        func(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status domain.ContainerStatus)
 	markRemovedFunc   func(containerId string) bool
+	retainRunningFunc func(runningIds map[string]struct{}) int
 	getAllDesiredFunc func() []*domain.RecordIntent
 
 	upsertCalled        bool
 	markRemovedCalled   bool
+	retainRunningCalled bool
 	getAllDesiredCalled bool
 
 	lastUpsertContainerId   string
 	lastUpsertContainerName string
 	lastUpsertIntents       []*domain.RecordIntent
 	lastMarkRemovedId       string
+	lastRetainRunningIds    map[string]struct{}
 }
 
 func (m *mockState) Upsert(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status domain.ContainerStatus) {
@@ -66,6 +69,18 @@ func (m *mockState) MarkRemoved(containerId string) bool {
 		return m.markRemovedFunc(containerId)
 	}
 	return true
+}
+
+func (m *mockState) RetainRunning(runningIds map[string]struct{}) int {
+	m.mu.Lock()
+	m.retainRunningCalled = true
+	m.lastRetainRunningIds = runningIds
+	m.mu.Unlock()
+
+	if m.retainRunningFunc != nil {
+		return m.retainRunningFunc(runningIds)
+	}
+	return 0
 }
 
 func (m *mockState) GetAllDesiredRecordIntents() []*domain.RecordIntent {

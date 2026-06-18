@@ -40,6 +40,28 @@ func (s *MemoryState) Upsert(containerId, containerName string, created time.Tim
 	}
 }
 
+// RetainRunning marks as removed any tracked container whose ID is not in the
+// given set of currently-running container IDs. It is used to reconcile state
+// after a (re)connection to the Docker daemon, when stop/die events may have
+// been missed (e.g. the daemon restarted and lost its event history). It
+// returns the number of containers newly marked removed.
+func (s *MemoryState) RetainRunning(runningIds map[string]struct{}) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for id, cs := range s.containers {
+		if cs.Status != domain.StatusRunning {
+			continue
+		}
+		if _, ok := runningIds[id]; !ok {
+			cs.Status = domain.StatusRemoved
+			cs.LastUpdated = time.Now()
+			removed++
+		}
+	}
+	return removed
+}
+
 // MarkRemoved marks a container state as removed.
 func (s *MemoryState) MarkRemoved(containerId string) bool {
 	s.mu.Lock()

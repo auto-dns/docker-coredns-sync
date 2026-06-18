@@ -21,10 +21,9 @@ func testLogger() zerolog.Logger {
 
 // fastGenerator returns a generator with tiny reconnect backoff so reconnect
 // paths exercise quickly in tests.
-func fastGenerator(cli dockerClient) *DockerGenerator {
-	gen := NewDockerGenerator(cli, testLogger())
-	gen.SetReconnectBackoff(2*time.Millisecond, 10*time.Millisecond)
-	return gen
+func fastGenerator(cli dockerClient, opts ...Option) *DockerGenerator {
+	base := []Option{WithReconnectBackoff(2*time.Millisecond, 10*time.Millisecond)}
+	return NewDockerGenerator(cli, testLogger(), append(base, opts...)...)
 }
 
 func startMsg(id, name string) events.Message {
@@ -34,6 +33,12 @@ func startMsg(id, name string) events.Message {
 		TimeNano: time.Now().UnixNano(),
 		Actor:    events.Actor{Attributes: map[string]string{"name": name}},
 	}
+}
+
+// isContainerEvent reports whether ev is a real container event (not a resync
+// bookkeeping event).
+func isContainerEvent(ev domain.ContainerEvent) bool {
+	return ev.EventType != domain.EventTypeResync
 }
 
 func TestNewDockerGenerator(t *testing.T) {
@@ -48,6 +53,26 @@ func TestNewDockerGenerator(t *testing.T) {
 	}
 	if gen.bufferSize != defaultEventBufferSize {
 		t.Errorf("expected default buffer size %d, got %d", defaultEventBufferSize, gen.bufferSize)
+	}
+}
+
+func TestWithReconnectBackoff_ClampsMax(t *testing.T) {
+	gen := NewDockerGenerator(newMockDockerClient(), testLogger(),
+		WithReconnectBackoff(60*time.Second, 30*time.Second))
+	if gen.reconnectMax < gen.reconnectInitial {
+		t.Errorf("expected max (%v) to be clamped up to initial (%v)", gen.reconnectMax, gen.reconnectInitial)
+	}
+}
+
+func TestWithEventBufferSize(t *testing.T) {
+	gen := NewDockerGenerator(newMockDockerClient(), testLogger(), WithEventBufferSize(7))
+	if gen.bufferSize != 7 {
+		t.Errorf("expected buffer size 7, got %d", gen.bufferSize)
+	}
+	// Non-positive is ignored.
+	gen = NewDockerGenerator(newMockDockerClient(), testLogger(), WithEventBufferSize(0))
+	if gen.bufferSize != defaultEventBufferSize {
+		t.Errorf("expected default buffer size for non-positive input, got %d", gen.bufferSize)
 	}
 }
 
@@ -86,6 +111,9 @@ func TestDockerGenerator_Subscribe_EmitsInitialContainers(t *testing.T) {
 
 	var received []domain.ContainerEvent
 	for ev := range ch {
+		if !isContainerEvent(ev) {
+			continue
+		}
 		received = append(received, ev)
 		if len(received) == 2 {
 			cancel()
@@ -99,6 +127,48 @@ func TestDockerGenerator_Subscribe_EmitsInitialContainers(t *testing.T) {
 		if ev.EventType != domain.EventTypeInitialContainerDetection {
 			t.Errorf("expected InitialContainerDetection, got %v", ev.EventType)
 		}
+	}
+}
+
+func TestDockerGenerator_Subscribe_EmitsResyncEvent(t *testing.T) {
+	mock := newMockDockerClient()
+	mock.containerListFunc = func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+		return []container.Summary{
+			{ID: "container-1", Names: []string{"/app-1"}, Created: time.Now().Unix()},
+			{ID: "container-2", Names: []string{"/app-2"}, Created: time.Now().Unix()},
+		}, nil
+	}
+
+	gen := fastGenerator(mock)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch, err := gen.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var resync *domain.ContainerEvent
+	for ev := range ch {
+		if ev.EventType == domain.EventTypeResync {
+			e := ev
+			resync = &e
+			cancel()
+		}
+	}
+
+	if resync == nil {
+		t.Fatal("expected a resync event")
+	}
+	if len(resync.RunningContainerIds) != 2 {
+		t.Fatalf("expected 2 running ids, got %d", len(resync.RunningContainerIds))
+	}
+	ids := map[string]bool{}
+	for _, id := range resync.RunningContainerIds {
+		ids[id] = true
+	}
+	if !ids["container-1"] || !ids["container-2"] {
+		t.Errorf("expected running ids to contain container-1 and container-2, got %v", resync.RunningContainerIds)
 	}
 }
 
@@ -121,7 +191,9 @@ func TestDockerGenerator_Subscribe_ContainerListErrorRetries(t *testing.T) {
 
 	var received []domain.ContainerEvent
 	for ev := range ch {
-		received = append(received, ev)
+		if isContainerEvent(ev) {
+			received = append(received, ev)
+		}
 	}
 
 	if len(received) != 0 {
@@ -157,6 +229,9 @@ func TestDockerGenerator_Subscribe_EmitsLiveEvents(t *testing.T) {
 
 	var received []domain.ContainerEvent
 	for ev := range ch {
+		if !isContainerEvent(ev) {
+			continue
+		}
 		received = append(received, ev)
 		cancel() // stop after the first live event
 	}
@@ -210,6 +285,9 @@ func TestDockerGenerator_Subscribe_FiltersEventTypes(t *testing.T) {
 
 			var received []domain.ContainerEvent
 			for ev := range ch {
+				if !isContainerEvent(ev) {
+					continue
+				}
 				received = append(received, ev)
 				cancel()
 			}
@@ -252,6 +330,9 @@ func TestDockerGenerator_Subscribe_SkipsUnsupportedEvents(t *testing.T) {
 
 	var received []domain.ContainerEvent
 	for ev := range ch {
+		if !isContainerEvent(ev) {
+			continue
+		}
 		received = append(received, ev)
 		cancel()
 	}
@@ -261,6 +342,58 @@ func TestDockerGenerator_Subscribe_SkipsUnsupportedEvents(t *testing.T) {
 	}
 	if received[0].Container.Id != "c2" {
 		t.Errorf("expected c2 (the start event), got %q", received[0].Container.Id)
+	}
+}
+
+func TestDockerGenerator_Subscribe_MultipleEventsOrdered(t *testing.T) {
+	eventCh := make(chan events.Message, 10)
+	errCh := make(chan error)
+	mock := newMockDockerClient()
+	mock.eventsFunc = func(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error) {
+		return eventCh, errCh
+	}
+
+	gen := fastGenerator(mock)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ch, err := gen.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		eventCh <- startMsg("c1", "app-1")
+		eventCh <- startMsg("c2", "app-2")
+		eventCh <- events.Message{
+			ID: "c1", Status: "die", TimeNano: time.Now().UnixNano(),
+			Actor: events.Actor{Attributes: map[string]string{"name": "app-1"}},
+		}
+	}()
+
+	var received []domain.ContainerEvent
+	for ev := range ch {
+		if !isContainerEvent(ev) {
+			continue
+		}
+		received = append(received, ev)
+		if len(received) == 3 {
+			cancel()
+		}
+	}
+
+	if len(received) != 3 {
+		t.Fatalf("expected 3 events in order, got %d", len(received))
+	}
+	if received[0].Container.Id != "c1" || received[0].EventType != domain.EventTypeContainerStarted {
+		t.Errorf("event 0 wrong: %+v", received[0])
+	}
+	if received[1].Container.Id != "c2" || received[1].EventType != domain.EventTypeContainerStarted {
+		t.Errorf("event 1 wrong: %+v", received[1])
+	}
+	if received[2].Container.Id != "c1" || received[2].EventType != domain.EventTypeContainerDied {
+		t.Errorf("event 2 wrong: %+v", received[2])
 	}
 }
 
@@ -292,6 +425,83 @@ func TestDockerGenerator_Subscribe_ContextCancellation(t *testing.T) {
 	}
 }
 
+func TestDockerGenerator_Subscribe_ContextCancelDuringInitialEmit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	mock := newMockDockerClient()
+	mock.containerListFunc = func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+		containers := make([]container.Summary, 100)
+		for i := 0; i < 100; i++ {
+			containers[i] = container.Summary{
+				ID:      "container-" + string(rune('a'+i%26)),
+				Names:   []string{"/container-" + string(rune('a'+i%26))},
+				Created: time.Now().Unix(),
+			}
+		}
+		return containers, nil
+	}
+
+	// Small buffer so the initial emit loop blocks and must observe cancellation.
+	gen := fastGenerator(mock, WithEventBufferSize(1))
+	ch, err := gen.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		for range ch {
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel did not close after cancellation during initial emit")
+	}
+}
+
+func TestDockerGenerator_Subscribe_ContextCancelDuringEventSend(t *testing.T) {
+	eventCh := make(chan events.Message, 100)
+	errCh := make(chan error)
+	mock := newMockDockerClient()
+	mock.eventsFunc = func(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error) {
+		return eventCh, errCh
+	}
+
+	// Buffer of 1; produce many events without consuming so the out-send blocks.
+	gen := fastGenerator(mock, WithEventBufferSize(1))
+	ctx, cancel := context.WithCancel(context.Background())
+
+	ch, err := gen.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	go func() {
+		for i := 0; i < 50; i++ {
+			eventCh <- startMsg("c", "app")
+		}
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		for range ch {
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("channel did not close after cancellation during event send")
+	}
+}
+
 func TestDockerGenerator_Subscribe_ErrorTriggersReconnect(t *testing.T) {
 	var connects int32
 	mock := newMockDockerClient()
@@ -300,10 +510,8 @@ func TestDockerGenerator_Subscribe_ErrorTriggersReconnect(t *testing.T) {
 		eventCh := make(chan events.Message, 1)
 		errCh := make(chan error, 1)
 		if n == 1 {
-			// First connection immediately errors out, forcing a reconnect.
-			errCh <- errors.New("connection reset")
+			errCh <- errors.New("connection reset") // force a reconnect
 		} else {
-			// Second connection delivers an event.
 			eventCh <- startMsg("after-reconnect", "app")
 		}
 		return eventCh, errCh
@@ -320,6 +528,9 @@ func TestDockerGenerator_Subscribe_ErrorTriggersReconnect(t *testing.T) {
 
 	var received []domain.ContainerEvent
 	for ev := range ch {
+		if !isContainerEvent(ev) {
+			continue
+		}
 		received = append(received, ev)
 		cancel()
 	}
@@ -362,6 +573,9 @@ func TestDockerGenerator_Subscribe_EventChannelCloseTriggersReconnect(t *testing
 
 	var received []domain.ContainerEvent
 	for ev := range ch {
+		if !isContainerEvent(ev) {
+			continue
+		}
 		received = append(received, ev)
 		cancel()
 	}
@@ -374,19 +588,23 @@ func TestDockerGenerator_Subscribe_EventChannelCloseTriggersReconnect(t *testing
 	}
 }
 
-func TestDockerGenerator_Subscribe_ErrorChannelCloseDoesNotReconnect(t *testing.T) {
-	eventCh := make(chan events.Message, 1)
-	errCh := make(chan error)
+func TestDockerGenerator_Subscribe_ErrorChannelCloseTriggersReconnect(t *testing.T) {
 	var connects int32
-
 	mock := newMockDockerClient()
 	mock.eventsFunc = func(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error) {
-		atomic.AddInt32(&connects, 1)
+		n := atomic.AddInt32(&connects, 1)
+		eventCh := make(chan events.Message, 1)
+		errCh := make(chan error)
+		if n == 1 {
+			close(errCh) // error channel closed -> reconnect (avoid silent stall)
+		} else {
+			eventCh <- startMsg("after-errclose", "app")
+		}
 		return eventCh, errCh
 	}
 
 	gen := fastGenerator(mock)
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
 	ch, err := gen.Subscribe(ctx)
@@ -394,23 +612,23 @@ func TestDockerGenerator_Subscribe_ErrorChannelCloseDoesNotReconnect(t *testing.
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		close(errCh) // closing the error channel must NOT cause a reconnect
-		eventCh <- startMsg("still-here", "app")
-	}()
-
 	var received []domain.ContainerEvent
 	for ev := range ch {
+		if !isContainerEvent(ev) {
+			continue
+		}
 		received = append(received, ev)
 		cancel()
 	}
 
 	if len(received) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(received))
+		t.Fatalf("expected 1 event after reconnect, got %d", len(received))
 	}
-	if c := atomic.LoadInt32(&connects); c != 1 {
-		t.Errorf("expected a single connection (no reconnect on errCh close), got %d", c)
+	if received[0].Container.Id != "after-errclose" {
+		t.Errorf("expected event from the second connection, got %q", received[0].Container.Id)
+	}
+	if atomic.LoadInt32(&connects) < 2 {
+		t.Errorf("expected reconnect after errCh close, got %d connects", connects)
 	}
 }
 
@@ -424,12 +642,11 @@ func TestDockerGenerator_Subscribe_ConnectionObserver(t *testing.T) {
 
 	var mu sync.Mutex
 	var states []bool
-	gen := fastGenerator(mock)
-	gen.SetConnectionObserver(func(connected bool) {
+	gen := fastGenerator(mock, WithConnectionObserver(func(connected bool) {
 		mu.Lock()
 		states = append(states, connected)
 		mu.Unlock()
-	})
+	}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -438,7 +655,6 @@ func TestDockerGenerator_Subscribe_ConnectionObserver(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Give it a moment to connect, then cancel.
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	for range ch {
@@ -452,37 +668,6 @@ func TestDockerGenerator_Subscribe_ConnectionObserver(t *testing.T) {
 	if states[len(states)-1] != false {
 		t.Errorf("expected final observed state to be connected=false, got %v", states)
 	}
-}
-
-func TestDockerGenerator_Subscribe_ContextCancelDuringInitialEmit(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	mock := newMockDockerClient()
-	mock.containerListFunc = func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
-		containers := make([]container.Summary, 100)
-		for i := 0; i < 100; i++ {
-			containers[i] = container.Summary{
-				ID:      "container-" + string(rune('a'+i%26)),
-				Names:   []string{"/container-" + string(rune('a'+i%26))},
-				Created: time.Now().Unix(),
-			}
-		}
-		return containers, nil
-	}
-
-	gen := fastGenerator(mock)
-	ch, err := gen.Subscribe(ctx)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	cancel()
-
-	count := 0
-	for range ch {
-		count++
-	}
-	t.Logf("received %d events before cancellation", count)
 }
 
 func TestNextBackoff(t *testing.T) {

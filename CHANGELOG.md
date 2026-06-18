@@ -32,7 +32,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 - The Docker event stream now reconnects automatically with bounded
   exponential backoff when it drops, instead of silently going dead while the
-  reconciliation loop kept running on stale in-memory state. (#8)
+  reconciliation loop kept running on stale in-memory state. On each
+  (re)connection the full running-container set is re-synced and state is pruned
+  of containers that stopped while disconnected (e.g. across a daemon restart),
+  the backoff resets after a healthy connection, and a closed error channel
+  triggers a reconnect rather than a silent stall. (#8)
+- The health server now fails fast at startup if its listen address cannot be
+  bound, instead of logging and continuing without endpoints. In dry-run mode
+  readiness reports not-ready, since no records are applied. (#9, #10)
 
 ## [0.6.1] - 2026-06-17
 

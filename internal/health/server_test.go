@@ -23,13 +23,29 @@ func freeAddr(t *testing.T) string {
 	return addr
 }
 
+func TestNewServer_BindError(t *testing.T) {
+	// Occupy an address, then try to bind the health server to the same one.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	defer ln.Close()
+
+	if _, err := NewServer(ln.Addr().String(), NewStatus(time.Minute), zerolog.Nop()); err == nil {
+		t.Error("expected NewServer to fail binding an in-use address")
+	}
+}
+
 func TestServer_StartAndShutdown(t *testing.T) {
 	status := NewStatus(time.Minute)
 	status.SetDockerConnected(true)
 	status.RecordReconcile(nil)
 
 	addr := freeAddr(t)
-	srv := NewServer(addr, status, zerolog.Nop())
+	srv, err := NewServer(addr, status, zerolog.Nop())
+	if err != nil {
+		t.Fatalf("unexpected error creating server: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	srv.Start(ctx)

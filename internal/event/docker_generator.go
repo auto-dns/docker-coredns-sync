@@ -13,6 +13,9 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// Defaults used when no option overrides them. These mirror the viper defaults
+// in internal/config (docker.event_buffer_size / reconnect_*); keep them in
+// sync.
 const (
 	defaultEventBufferSize     = 100
 	defaultReconnectInitial    = 1 * time.Second
@@ -28,37 +31,55 @@ type DockerGenerator struct {
 	reconnectMax       time.Duration
 }
 
-func NewDockerGenerator(cli dockerClient, logger zerolog.Logger) *DockerGenerator {
-	return &DockerGenerator{
+// Option configures a DockerGenerator at construction time.
+type Option func(*DockerGenerator)
+
+// WithEventBufferSize sets the size of the buffered output channel.
+func WithEventBufferSize(n int) Option {
+	return func(dw *DockerGenerator) {
+		if n > 0 {
+			dw.bufferSize = n
+		}
+	}
+}
+
+// WithReconnectBackoff sets the reconnect backoff bounds. max is clamped up to
+// initial so the bounds are always consistent even if called with max < initial.
+func WithReconnectBackoff(initial, max time.Duration) Option {
+	return func(dw *DockerGenerator) {
+		if initial > 0 {
+			dw.reconnectInitial = initial
+		}
+		if max > 0 {
+			dw.reconnectMax = max
+		}
+		if dw.reconnectMax < dw.reconnectInitial {
+			dw.reconnectMax = dw.reconnectInitial
+		}
+	}
+}
+
+// WithConnectionObserver registers a callback invoked when the Docker event
+// stream connects (true) or disconnects (false). The callback must be
+// non-blocking: it runs inline on the generator's goroutine.
+func WithConnectionObserver(fn func(connected bool)) Option {
+	return func(dw *DockerGenerator) {
+		dw.onConnectionChange = fn
+	}
+}
+
+func NewDockerGenerator(cli dockerClient, logger zerolog.Logger, opts ...Option) *DockerGenerator {
+	dw := &DockerGenerator{
 		logger:           logger,
 		cli:              cli,
 		bufferSize:       defaultEventBufferSize,
 		reconnectInitial: defaultReconnectInitial,
 		reconnectMax:     defaultReconnectMaxBackoff,
 	}
-}
-
-// SetConnectionObserver registers an optional callback invoked when the Docker
-// event stream connects (true) or disconnects (false). Safe to leave unset.
-func (dw *DockerGenerator) SetConnectionObserver(fn func(connected bool)) {
-	dw.onConnectionChange = fn
-}
-
-// SetEventBufferSize overrides the size of the buffered output channel.
-func (dw *DockerGenerator) SetEventBufferSize(n int) {
-	if n > 0 {
-		dw.bufferSize = n
+	for _, opt := range opts {
+		opt(dw)
 	}
-}
-
-// SetReconnectBackoff overrides the reconnect backoff bounds.
-func (dw *DockerGenerator) SetReconnectBackoff(initial, max time.Duration) {
-	if initial > 0 {
-		dw.reconnectInitial = initial
-	}
-	if max >= initial && max > 0 {
-		dw.reconnectMax = max
-	}
+	return dw
 }
 
 func (dw *DockerGenerator) setConnected(connected bool) {
@@ -70,8 +91,9 @@ func (dw *DockerGenerator) setConnected(connected bool) {
 // Subscribe streams container events. It transparently reconnects (with bounded
 // exponential backoff) if the Docker event stream drops, and only stops when
 // ctx is cancelled. On each (re)connection it re-lists running containers so
-// in-memory state re-syncs, and resumes the event stream from the last-seen
-// event so transitions during the outage are not missed.
+// in-memory state re-syncs (including pruning containers that stopped while
+// disconnected, via a resync event), and resumes the event stream from the
+// last-seen event so transitions during the outage are not missed.
 func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.ContainerEvent, error) {
 	out := make(chan domain.ContainerEvent, dw.bufferSize)
 
@@ -87,7 +109,7 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 				return
 			}
 
-			err := dw.runOnce(ctx, out, &since)
+			connected, err := dw.runOnce(ctx, out, &since)
 
 			// A cancelled context is a clean shutdown, not a disconnect.
 			if ctx.Err() != nil {
@@ -101,6 +123,12 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 				dw.logger.Warn().Dur("backoff", backoff).Msg("Docker event stream closed; reconnecting after backoff")
 			}
 
+			// A drop after a healthy connection should retry quickly, so reset
+			// the backoff once we have actually connected at least once.
+			if connected {
+				backoff = dw.reconnectInitial
+			}
+
 			if !sleepCtx(ctx, jitter(backoff)) {
 				return
 			}
@@ -111,21 +139,31 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 	return out, nil
 }
 
-// runOnce performs a single connection cycle: it lists current containers, then
-// streams events until the stream ends. It returns nil when the stream closed
-// (caller should reconnect), an error when the connection failed, or simply
-// returns when ctx is cancelled (caller detects this via ctx.Err()).
-func (dw *DockerGenerator) runOnce(ctx context.Context, out chan<- domain.ContainerEvent, since *time.Time) error {
+// runOnce performs a single connection cycle: it lists current containers
+// (emitting detection events plus a resync event), then streams events until
+// the stream ends. It returns whether the connection was established, and an
+// error when the connection failed. It returns when ctx is cancelled (caller
+// detects this via ctx.Err()).
+func (dw *DockerGenerator) runOnce(ctx context.Context, out chan<- domain.ContainerEvent, since *time.Time) (bool, error) {
 	containers, err := dw.cli.ContainerList(ctx, container.ListOptions{All: false})
 	if err != nil {
-		return fmt.Errorf("listing containers: %w", err)
+		return false, fmt.Errorf("listing containers: %w", err)
 	}
+	runningIds := make([]string, 0, len(containers))
 	for _, c := range containers {
+		runningIds = append(runningIds, c.ID)
 		select {
 		case out <- fromContainerSummary(c):
 		case <-ctx.Done():
-			return nil
+			return false, nil
 		}
+	}
+	// Tell the engine the full running set so it can prune containers that
+	// stopped while we were disconnected.
+	select {
+	case out <- domain.ContainerEvent{EventType: domain.EventTypeResync, RunningContainerIds: runningIds}:
+	case <-ctx.Done():
+		return false, nil
 	}
 
 	filterArgs := filters.NewArgs()
@@ -145,23 +183,28 @@ func (dw *DockerGenerator) runOnce(ctx context.Context, out chan<- domain.Contai
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return true, nil
 		case err, ok := <-errCh:
 			if !ok {
-				// Error channel closed; disable this case and keep reading events.
-				errCh = nil
-				continue
+				// The client closed the error channel; treat the stream as
+				// ended and reconnect rather than risk reading a now-dead
+				// event channel forever.
+				return true, nil
 			}
 			if err != nil {
-				return fmt.Errorf("docker events stream: %w", err)
+				return true, fmt.Errorf("docker events stream: %w", err)
 			}
 		case msg, ok := <-eventCh:
 			if !ok {
 				// Event stream closed; signal a reconnect.
-				return nil
+				return true, nil
 			}
-			// Track progress so a reconnect resumes from here.
-			*since = time.Unix(0, msg.TimeNano)
+			// Track progress so a reconnect resumes from here. Guard against a
+			// zero/absent timestamp, which would otherwise rewind `since` to
+			// the epoch and replay the entire event history on reconnect.
+			if msg.TimeNano > 0 {
+				*since = time.Unix(0, msg.TimeNano)
+			}
 
 			event, convErr := fromEventsMessage(msg)
 			if convErr != nil {
@@ -177,7 +220,7 @@ func (dw *DockerGenerator) runOnce(ctx context.Context, out chan<- domain.Contai
 			select {
 			case out <- event:
 			case <-ctx.Done():
-				return nil
+				return true, nil
 			}
 		}
 	}

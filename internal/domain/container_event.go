@@ -9,6 +9,10 @@ const (
 	EventTypeContainerStarted          EventType = "start"
 	EventTypeContainerStopped          EventType = "stop"
 	EventTypeInitialContainerDetection EventType = "initial_detection"
+	// EventTypeResync carries the full set of currently-running container IDs
+	// observed on a (re)connection to the Docker daemon, so the engine can
+	// prune state for containers that disappeared while it was disconnected.
+	EventTypeResync EventType = "resync"
 )
 
 // ContainerStatus is the in-memory lifecycle state the tracker keeps per container.
@@ -24,7 +28,8 @@ func (et EventType) IsValid() bool {
 	case EventTypeContainerDied,
 		EventTypeContainerStarted,
 		EventTypeContainerStopped,
-		EventTypeInitialContainerDetection:
+		EventTypeInitialContainerDetection,
+		EventTypeResync:
 		return true
 	}
 	return false
@@ -40,4 +45,7 @@ type Container struct {
 type ContainerEvent struct {
 	Container Container
 	EventType EventType
+	// RunningContainerIds is set only for EventTypeResync events: the IDs of
+	// all containers running at the moment of (re)connection.
+	RunningContainerIds []string
 }
