@@ -322,9 +322,9 @@ func TestParseLabels_IgnoresUnknownKinds(t *testing.T) {
 func TestParseLabels_MalformedLabels(t *testing.T) {
 	labels := map[string]string{
 		"coredns.enabled": "true",
-		"coredns.A":       "incomplete",      // Missing .name or .value
-		"coredns":         "root_only",       // Just prefix
-		"coredns.":        "trailing_dot",    // Trailing dot
+		"coredns.A":       "incomplete",        // Missing .name or .value
+		"coredns":         "root_only",         // Just prefix
+		"coredns.":        "trailing_dot",      // Trailing dot
 		"coredns.A.name":  "valid.example.com", // This one is valid
 	}
 
@@ -393,7 +393,7 @@ func TestParseLabels_CaseInsensitiveKind(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.kindLabel, func(t *testing.T) {
 			labels := map[string]string{
-				"coredns.enabled":                     "true",
+				"coredns.enabled":                    "true",
 				"coredns." + tc.kindLabel + ".name":  "app.example.com",
 				"coredns." + tc.kindLabel + ".value": "target.example.com",
 			}

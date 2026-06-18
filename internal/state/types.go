@@ -12,5 +12,5 @@ type containerState struct {
 	Created       time.Time
 	LastUpdated   time.Time
 	RecordIntents []*domain.RecordIntent
-	Status        string // "running", "removed"
+	Status        domain.ContainerStatus
 }

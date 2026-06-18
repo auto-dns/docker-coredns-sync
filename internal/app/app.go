@@ -17,13 +17,9 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-type Closeable interface {
-	Close() error
-}
-
 type App struct {
-	dockerClient Closeable
-	etcdClient   Closeable
+	dockerClient io.Closer
+	etcdClient   io.Closer
 	engine       *core.SyncEngine
 	logger       zerolog.Logger
 }
@@ -82,7 +78,6 @@ var _ io.Closer = (*App)(nil)
 
 // Run starts the application by running the sync engine.
 func (a *App) Run(ctx context.Context) error {
-	defer func() {}()
 	a.logger.Info().Msg("Application starting")
 	return a.engine.Run(ctx)
 }

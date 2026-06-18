@@ -55,14 +55,14 @@ The application watches Docker container events and syncs DNS records into etcd 
 ### Data flow
 
 1. **`cmd/docker-coredns-sync/root.go`** — Cobra CLI entrypoint. Loads config via Viper (flags → env vars → config file → defaults), sets up signal handling, creates and runs the app.
-2. **`internal/app/app.go`** — Constructs the `DockerWatcher` and `EtcdRegistry`, then starts the `SyncEngine`.
+2. **`internal/app/app.go`** — Constructs the `DockerGenerator` and `EtcdRegistry`, then starts the `SyncEngine`.
 3. **`internal/core/engine.go` (`SyncEngine`)** — Central coordinator:
-   - Subscribes to Docker events via `DockerWatcher`
+   - Subscribes to Docker events via `DockerGenerator`
    - Pre-populates in-memory state from currently running containers on startup
-   - Processes `start`/`stop` events to update `StateTracker`
+   - Processes `start`/`stop` events to update `MemoryState`
    - Runs a reconciliation loop every `poll_interval` seconds under a distributed etcd lock
 4. **`internal/core/record_builder.go`** — Parses Docker labels from a container event into `RecordIntent` objects. Handles both simple (`coredns.A.name`) and aliased (`coredns.A.proxy.name`) label formats.
-5. **`internal/core/state.go` (`StateTracker`)** — Thread-safe in-memory map of container ID → `ContainerState`. Only "running" containers contribute desired records.
+5. **`internal/state/memory_state.go` (`MemoryState`)** — Thread-safe in-memory map of container ID → `containerState`. Only "running" containers contribute desired records.
 6. **`internal/core/reconciliation.go`** — Two-stage reconciliation:
    - `FilterRecordIntents`: resolves conflicts *within* the desired set (multiple containers wanting the same DNS name). Priority: `force` label beats non-force; older container wins when force flags are equal. A/CNAME conflicts are also resolved here.
    - `ReconcileAndValidate`: compares desired vs. actual etcd state. Produces `toAdd`/`toRemove` slices. Only removes records owned by this hostname (`cfg.Hostname`). Handles cross-host eviction via `force` and container age.
@@ -70,9 +70,9 @@ The application watches Docker container events and syncs DNS records into etcd 
 
 ### Key types
 
-- **`RecordIntent`** (`internal/intent/`) — Wraps a DNS record with ownership metadata (container ID/name, hostname, created timestamp, force flag). This is the unit of work throughout the system.
-- **`dns.Record`** interface (`internal/dns/`) — Implemented by `ARecord` and `CNAMERecord`.
-- **`NestedRecordMap`** (`internal/core/nested_maps.go`) — Three-level map `name → type → value → RecordIntent` used during reconciliation to group and look up records efficiently.
+- **`RecordIntent`** (`internal/domain/`) — Wraps a DNS record with ownership metadata (container ID/name, hostname, created timestamp, force flag). This is the unit of work throughout the system.
+- **`Record`** (`internal/domain/`) — A value struct carrying a `RecordKind` (`A`, `AAAA`, or `CNAME`), name, and value. Constructed via `NewA`/`NewAAAA`/`NewCNAME` (or `NewFromKind`), which validate the hostname and address.
+- **`nestedRecordMap`** (`internal/core/nested_maps.go`) — Three-level map `name → kind → value → RecordIntent` used during reconciliation to group and look up records efficiently.
 
 ### Conflict resolution rules
 

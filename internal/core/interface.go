@@ -12,7 +12,7 @@ type generator interface {
 }
 
 type state interface {
-	Upsert(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status string)
+	Upsert(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status domain.ContainerStatus)
 	MarkRemoved(containerId string) bool
 	GetAllDesiredRecordIntents() []*domain.RecordIntent
 }

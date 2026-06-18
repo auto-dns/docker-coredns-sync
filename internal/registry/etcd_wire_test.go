@@ -104,10 +104,10 @@ func TestMarshalEtcdValue_ForceFalse(t *testing.T) {
 
 func TestMarshalEtcdValue_DifferentRecordTypes(t *testing.T) {
 	tests := []struct {
-		name     string
-		kind     domain.RecordKind
-		recName  string
-		value    string
+		name    string
+		kind    domain.RecordKind
+		recName string
+		value   string
 	}{
 		{"A record", domain.RecordA, "app.example.com", "192.168.1.1"},
 		{"AAAA record", domain.RecordAAAA, "app.example.com", "::1"},

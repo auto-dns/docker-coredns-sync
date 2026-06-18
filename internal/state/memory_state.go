@@ -13,7 +13,7 @@ type MemoryState struct {
 	containers map[string]*containerState
 }
 
-// NewStateTracker creates a new tracker.
+// NewMemoryState creates a new in-memory state tracker.
 func NewMemoryState() *MemoryState {
 	return &MemoryState{
 		containers: make(map[string]*containerState),
@@ -21,7 +21,13 @@ func NewMemoryState() *MemoryState {
 }
 
 // Upsert inserts or updates the state for a container.
-func (s *MemoryState) Upsert(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status string) {
+//
+// The intents slice is stored by reference and later handed to the
+// reconciliation loop (via GetAllDesiredRecordIntents) without holding the
+// lock. This is safe only because RecordIntents are treated as immutable once
+// built: Upsert always replaces a container's entry wholesale rather than
+// mutating an existing one in place. Do not mutate a stored RecordIntent.
+func (s *MemoryState) Upsert(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status domain.ContainerStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.containers[containerId] = &containerState{
@@ -39,7 +45,7 @@ func (s *MemoryState) MarkRemoved(containerId string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if state, exists := s.containers[containerId]; exists {
-		state.Status = "removed"
+		state.Status = domain.StatusRemoved
 		state.LastUpdated = time.Now()
 		return true
 	}
@@ -52,7 +58,7 @@ func (s *MemoryState) GetAllDesiredRecordIntents() []*domain.RecordIntent {
 	defer s.mu.RUnlock()
 	var intents []*domain.RecordIntent
 	for _, cs := range s.containers {
-		if cs.Status == "running" {
+		if cs.Status == domain.StatusRunning {
 			intents = append(intents, cs.RecordIntents...)
 		}
 	}

@@ -1288,9 +1288,9 @@ func TestEtcdRegistry_getNextIndexedKey_KeyWithoutSlash(t *testing.T) {
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 		return &clientv3.GetResponse{
 			Kvs: []*mvccpb.KeyValue{
-				{Key: []byte("/skydns/com/example/app")},        // Exact base, no slash
-				{Key: []byte("/skydns/com/example/appx1")},      // No slash before x1
-				{Key: []byte("/skydns/com/example/app/x1")},     // Valid key
+				{Key: []byte("/skydns/com/example/app")},           // Exact base, no slash
+				{Key: []byte("/skydns/com/example/appx1")},         // No slash before x1
+				{Key: []byte("/skydns/com/example/app/x1")},        // Valid key
 				{Key: []byte("/skydns/com/example/app/nested/x2")}, // Nested path (suffix contains /)
 			},
 		}, nil

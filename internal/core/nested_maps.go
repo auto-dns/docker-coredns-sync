@@ -22,12 +22,12 @@ type recordMap struct {
 func newNestedRecordMap() *nestedRecordMap {
 	return &nestedRecordMap{
 		DefaultMap: util.NewDefaultMap[string](func() *kindMap {
-			return newkindMap()
+			return newKindMap()
 		}),
 	}
 }
 
-func newkindMap() *kindMap {
+func newKindMap() *kindMap {
 	return &kindMap{
 		DefaultMap: util.NewDefaultMap[domain.RecordKind](func() *recordMap {
 			return newRecordMap()
@@ -43,7 +43,6 @@ func newRecordMap() *recordMap {
 	}
 }
 
-// By nothing
 func (m nestedRecordMap) GetAllValues() []*domain.RecordIntent {
 	values := make([]*domain.RecordIntent, 0)
 	for _, kindMap := range m.Values() {
@@ -64,8 +63,6 @@ func (m nestedRecordMap) GetAllNames() []string {
 	return names
 }
 
-// By name
-
 // By name and kind
 func (m nestedRecordMap) PeekNameKindRecords(name string, kind domain.RecordKind) ([]*domain.RecordIntent, bool) {
 	if kindMap, exists := m.Peek(name); exists {
@@ -77,18 +74,7 @@ func (m nestedRecordMap) PeekNameKindRecords(name string, kind domain.RecordKind
 	return []*domain.RecordIntent{}, false
 }
 
-// DeleteNameKind removes all records of a specific kind for a name
-func (m nestedRecordMap) DeleteNameKind(name string, kind domain.RecordKind) {
-	if domainMap, exists := m.Peek(name); exists {
-		domainMap.Delete(kind)
-	}
-}
-
 // By name, kind, and value
-func (m *nestedRecordMap) GetNameKindRecord(name string, kind domain.RecordKind, value string) *domain.RecordIntent {
-	return m.Get(name).Get(kind).Get(value)
-}
-
 func (m *nestedRecordMap) PeekNameKindRecord(name string, kind domain.RecordKind, value string) (*domain.RecordIntent, bool) {
 	kindMap, exists := m.Peek(name)
 	if !exists {

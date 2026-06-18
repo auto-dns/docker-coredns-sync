@@ -128,26 +128,6 @@ func TestNestedRecordMap_PeekNameKindRecord_NotExists(t *testing.T) {
 	}
 }
 
-func TestNestedRecordMap_DeleteNameKind(t *testing.T) {
-	m := newNestedRecordMap()
-	intent := makeTestIntent("app.example.com", domain.RecordA, "192.168.1.1")
-	m.Get("app.example.com").Get(domain.RecordA).Set("192.168.1.1", intent)
-
-	m.DeleteNameKind("app.example.com", domain.RecordA)
-
-	_, exists := m.PeekNameKindRecords("app.example.com", domain.RecordA)
-	if exists {
-		t.Error("expected records to be deleted")
-	}
-}
-
-func TestNestedRecordMap_DeleteNameKind_NoOpForNonexistent(t *testing.T) {
-	m := newNestedRecordMap()
-
-	// Should not panic
-	m.DeleteNameKind("nonexistent.com", domain.RecordA)
-}
-
 func TestNestedRecordMap_GetAllValues(t *testing.T) {
 	m := newNestedRecordMap()
 	intent1 := makeTestIntent("app1.example.com", domain.RecordA, "192.168.1.1")
@@ -213,35 +193,6 @@ func TestNestedRecordMap_GetAllNames_Empty(t *testing.T) {
 
 	if len(names) != 0 {
 		t.Errorf("expected 0 names, got %d", len(names))
-	}
-}
-
-func TestNestedRecordMap_GetNameKindRecord(t *testing.T) {
-	m := newNestedRecordMap()
-	intent := makeTestIntent("app.example.com", domain.RecordA, "192.168.1.1")
-	m.Get("app.example.com").Get(domain.RecordA).Set("192.168.1.1", intent)
-
-	result := m.GetNameKindRecord("app.example.com", domain.RecordA, "192.168.1.1")
-
-	if result != intent {
-		t.Error("expected to get the same intent")
-	}
-}
-
-func TestNestedRecordMap_GetNameKindRecord_CreatesOnMiss(t *testing.T) {
-	m := newNestedRecordMap()
-
-	// GetNameKindRecord uses Get which creates entries
-	result := m.GetNameKindRecord("new.example.com", domain.RecordA, "192.168.1.1")
-
-	// The factory returns nil for missing records
-	if result != nil {
-		t.Error("expected nil for non-existent record")
-	}
-
-	// But the hierarchy should have been created
-	if !m.Contains("new.example.com") {
-		t.Error("expected name to be created in map")
 	}
 }
 
