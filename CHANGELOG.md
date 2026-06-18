@@ -6,6 +6,21 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-17
+
+Maintenance release. No functional or configuration changes — the application's
+runtime behavior is unchanged from the previous release.
+
+### Changed
+- Typed the container event and status enums; replaced `"running"`/`"removed"`
+  magic strings with `domain.ContainerStatus` constants.
+- Use the standard library `io.Closer` in place of a local interface; lowercased
+  internal error strings to follow Go conventions.
+- Formatted the entire codebase with `gofmt`.
+
+### Removed
+- Unused internal utility helpers and dead record-map methods.
+
 ## [0.1.4] - 2026-05-15
 
 ### Changed
