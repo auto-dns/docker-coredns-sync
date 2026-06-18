@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -696,6 +697,132 @@ func TestSyncEngine_Run_CloseError(t *testing.T) {
 	// Context error should be returned, not Close error
 	if err != context.DeadlineExceeded {
 		t.Errorf("expected context.DeadlineExceeded, got %v", err)
+	}
+}
+
+type recordingReporter struct {
+	mu    sync.Mutex
+	calls []error
+}
+
+func (r *recordingReporter) RecordReconcile(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, err)
+}
+
+func (r *recordingReporter) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.calls)
+}
+
+func TestSyncEngine_Run_DryRunSkipsWrites(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+
+	rec, _ := domain.NewA("app.example.com", "192.168.1.1")
+	desiredIntents := []*domain.RecordIntent{
+		{
+			ContainerId:   "container-123",
+			ContainerName: "my-app",
+			Created:       time.Now(),
+			Hostname:      "test-host",
+			Record:        rec,
+		},
+	}
+
+	staleRec, _ := domain.NewA("stale.example.com", "192.168.1.99")
+	staleRecord := &domain.RecordIntent{
+		ContainerId:   "old-container",
+		ContainerName: "old-app",
+		Created:       time.Now().Add(-time.Hour),
+		Hostname:      "test-host",
+		Record:        staleRec,
+	}
+
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return desiredIntents
+		},
+	}
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{staleRecord}, nil
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+	cfg.DryRun = true
+
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() {
+		engine.Run(ctx)
+	}()
+
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	// Reconciliation still runs (list + plan), but nothing is written.
+	if !reg.WasListCalled() {
+		t.Error("expected List to be called even in dry-run")
+	}
+	if reg.WasRegisterCalled() {
+		t.Error("expected Register NOT to be called in dry-run")
+	}
+	if reg.WasRemoveCalled() {
+		t.Error("expected Remove NOT to be called in dry-run")
+	}
+}
+
+func TestSyncEngine_Run_ReportsReconcileResult(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return []*domain.RecordIntent{}
+		},
+	}
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{}, nil
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+
+	reporter := &recordingReporter{}
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+	engine.SetReconcileReporter(reporter)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() {
+		engine.Run(ctx)
+	}()
+
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	if reporter.count() == 0 {
+		t.Error("expected reconcile reporter to be notified at least once")
 	}
 }
 

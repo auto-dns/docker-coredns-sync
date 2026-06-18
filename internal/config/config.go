@@ -24,6 +24,9 @@ type AppConfig struct {
 	HostIPv6          string `mapstructure:"host_ipv6"`
 	Hostname          string `mapstructure:"hostname"`
 	PollInterval      int    `mapstructure:"poll_interval"`
+	// DryRun, when true, makes the reconciliation loop log the planned
+	// changes without writing to or removing anything from etcd.
+	DryRun bool `mapstructure:"dry_run"`
 }
 
 // EtcdConfig holds etcd-related configuration.
@@ -87,6 +90,7 @@ func initConfig() error {
 	viper.SetDefault("app.host_ipv6", "")
 	viper.SetDefault("app.hostname", "")
 	viper.SetDefault("app.poll_interval", 5)
+	viper.SetDefault("app.dry_run", false)
 	viper.SetDefault("etcd.endpoints", []string{"http://localhost:2379"})
 	viper.SetDefault("etcd.path_prefix", "/skydns")
 	viper.SetDefault("etcd.lock_ttl", 5.0)

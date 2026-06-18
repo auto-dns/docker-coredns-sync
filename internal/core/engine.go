@@ -12,11 +12,12 @@ import (
 
 // SyncEngine coordinates event ingestion, state updates, and registry reconciliation.
 type SyncEngine struct {
-	logger zerolog.Logger
-	cfg    *config.AppConfig
-	gen    generator
-	state  state
-	reg    upstreamRegistry
+	logger   zerolog.Logger
+	cfg      *config.AppConfig
+	gen      generator
+	state    state
+	reg      upstreamRegistry
+	reporter reconcileReporter
 }
 
 func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, reg upstreamRegistry, state state) *SyncEngine {
@@ -27,6 +28,12 @@ func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, 
 		reg:    reg,
 		state:  state,
 	}
+}
+
+// SetReconcileReporter registers an optional observer that is notified of the
+// outcome of each reconciliation pass. Safe to leave unset.
+func (se *SyncEngine) SetReconcileReporter(r reconcileReporter) {
+	se.reporter = r
 }
 
 func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
@@ -92,6 +99,15 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 				// Filter out any internally inconsistent intents:
 				desiredReconciled := FilterRecordIntents(desired, se.logger)
 				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, se.logger)
+				if se.cfg.DryRun {
+					for _, rec := range toRemove {
+						se.logger.Info().Str("record", rec.Render()).Msg("[dry-run] would remove record")
+					}
+					for _, rec := range toAdd {
+						se.logger.Info().Str("record", rec.Render()).Msg("[dry-run] would register record")
+					}
+					return nil
+				}
 				for _, rec := range toRemove {
 					if err := se.reg.Remove(ctx, rec); err != nil {
 						se.logger.Error().Err(err).Msg("Error removing record")
@@ -104,6 +120,9 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 				}
 				return nil
 			})
+			if se.reporter != nil {
+				se.reporter.RecordReconcile(err)
+			}
 			if err != nil {
 				se.logger.Error().Err(err).Msg("Sync error")
 			}

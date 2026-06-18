@@ -24,3 +24,9 @@ type upstreamRegistry interface {
 	Remove(ctx context.Context, record *domain.RecordIntent) error
 	Close() error
 }
+
+// reconcileReporter is an optional observer of reconciliation outcomes, used to
+// feed liveness/readiness reporting. A nil error indicates a successful pass.
+type reconcileReporter interface {
+	RecordReconcile(err error)
+}
