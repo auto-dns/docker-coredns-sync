@@ -10,6 +10,7 @@ import (
 
 type etcdRecord struct {
 	Host               string            `json:"host"`
+	TTL                uint32            `json:"ttl,omitempty"`
 	Kind               domain.RecordKind `json:"record_type"`
 	OwnerHostname      string            `json:"owner_hostname"`
 	OwnerContainerId   string            `json:"owner_container_id"`
@@ -21,6 +22,7 @@ type etcdRecord struct {
 func marshalEtcdValue(ri *domain.RecordIntent) (string, error) {
 	wire := etcdRecord{
 		Host:               ri.Record.Value,
+		TTL:                ri.TTL,
 		Kind:               ri.Record.Kind,
 		OwnerHostname:      ri.Hostname,
 		OwnerContainerId:   ri.ContainerId,
@@ -54,6 +56,7 @@ func unmarshalEtcdValue(key string, raw string, prefix string) (*domain.RecordIn
 		Created:       wire.Created,
 		Hostname:      wire.OwnerHostname,
 		Force:         wire.Force,
+		TTL:           wire.TTL,
 		Record:        rec,
 	}, nil
 }

@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/auto-dns/docker-coredns-sync/internal/domain"
@@ -11,9 +12,10 @@ type LabeledRecord struct {
 	prefix string
 	Kind   domain.RecordKind // A, AAAA, CNAME
 	Name   string
-	Value  string // may be empty for A (defaults)
-	Alias  string // optional
-	Force  *bool  // Force is tri-state: nil = not specified on the record label, non-nil = explicit value
+	Value  string  // may be empty for A (defaults)
+	Alias  string  // optional
+	Force  *bool   // Force is tri-state: nil = not specified on the record label, non-nil = explicit value
+	TTL    *uint32 // TTL is tri-state: nil = not specified on the record label, non-nil = explicit override
 }
 
 func (lr LabeledRecord) GetNameLabel() string {
@@ -59,6 +61,7 @@ func ParseLabels(prefix string, labels map[string]string) ParsedLabels {
 		name  string
 		value string
 		force *bool
+		ttl   *uint32
 	}
 
 	aggregations := map[string]*aggregation{}
@@ -93,7 +96,7 @@ func ParseLabels(prefix string, labels map[string]string) ParsedLabels {
 		}
 
 		field := parts[keyIdx]
-		if field != "name" && field != "value" && field != "force" {
+		if field != "name" && field != "value" && field != "force" && field != "ttl" {
 			continue
 		}
 
@@ -112,6 +115,10 @@ func ParseLabels(prefix string, labels map[string]string) ParsedLabels {
 		case "force":
 			force := boolFromLabel(v)
 			a.force = &force
+		case "ttl":
+			if ttl, ok := ttlFromLabel(v); ok {
+				a.ttl = &ttl
+			}
 		}
 	}
 
@@ -124,6 +131,7 @@ func ParseLabels(prefix string, labels map[string]string) ParsedLabels {
 			Value:  a.value, // may be empty; caller decides fallback (e.g., host IP for A)
 			Alias:  a.alias,
 			Force:  a.force,
+			TTL:    a.ttl,
 		})
 	}
 
@@ -131,3 +139,13 @@ func ParseLabels(prefix string, labels map[string]string) ParsedLabels {
 }
 
 func boolFromLabel(v string) bool { return strings.EqualFold(strings.TrimSpace(v), "true") }
+
+// ttlFromLabel parses a TTL label value (seconds). It returns ok=false for
+// blank or non-numeric values so a bad label is ignored rather than applied.
+func ttlFromLabel(v string) (uint32, bool) {
+	n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 32)
+	if err != nil {
+		return 0, false
+	}
+	return uint32(n), true
+}

@@ -314,7 +314,7 @@ func TestReconcileAndValidate_AddNewRecord(t *testing.T) {
 	}
 	actual := []*domain.RecordIntent{}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	if len(toAdd) != 1 {
 		t.Errorf("expected 1 record to add, got %d", len(toAdd))
@@ -331,7 +331,7 @@ func TestReconcileAndValidate_RemoveStaleOwned(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordA, "192.168.1.1", "c1", time.Now(), false, "test-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	if len(toAdd) != 0 {
 		t.Errorf("expected 0 records to add, got %d", len(toAdd))
@@ -348,7 +348,7 @@ func TestReconcileAndValidate_KeepStaleNotOwned(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordA, "192.168.1.1", "c1", time.Now(), false, "other-host"), // different host
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	if len(toAdd) != 0 {
 		t.Errorf("expected 0 records to add, got %d", len(toAdd))
@@ -364,7 +364,7 @@ func TestReconcileAndValidate_IdenticalNoOp(t *testing.T) {
 	desired := []*domain.RecordIntent{intent}
 	actual := []*domain.RecordIntent{intent}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	if len(toAdd) != 0 {
 		t.Errorf("expected 0 records to add, got %d", len(toAdd))
@@ -384,7 +384,7 @@ func TestReconcileAndValidate_EvictCNAMEForA(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target.example.com", "c2", now, false, "test-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	if len(toAdd) != 1 {
 		t.Errorf("expected 1 record to add, got %d", len(toAdd))
@@ -404,7 +404,7 @@ func TestReconcileAndValidate_ForceEviction(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordA, "192.168.1.1", "c2", now.Add(-5*time.Hour), false, "test-host"),
 	}
 
-	toAdd, _ := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, _ := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Force should cause eviction of different record with same name+kind+value
 	if len(toAdd) != 1 {
@@ -421,7 +421,7 @@ func TestReconcileAndValidate_ValidationFailureSkipped(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordA, "192.168.1.1", "c2", time.Now().Add(-10*time.Hour), false, "other-host"), // other host, won't be evicted
 	}
 
-	toAdd, _ := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, _ := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// CNAME conflicts with A record that can't be evicted (different host)
 	if len(toAdd) != 0 {
@@ -445,7 +445,7 @@ func TestReconcileAndValidate_ComplexScenario(t *testing.T) {
 		makeRecordIntent("other.example.com", domain.RecordA, "192.168.1.100", "c5", now, false, "other-host"), // not owned
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Should add: app1, alias
 	// Should remove: stale (owned, not in desired)
@@ -555,7 +555,7 @@ func TestReconcileAndValidate_AAAAVsCNAME_AAAAWins(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target.example.com", "c2", now, false, "test-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	if len(toAdd) != 1 {
 		t.Errorf("expected 1 AAAA record to add, got %d", len(toAdd))
@@ -576,7 +576,7 @@ func TestReconcileAndValidate_AAAAVsCNAME_CNAMEWins(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target.example.com", "c2", now.Add(-5*time.Hour), false, "other-host"),
 	}
 
-	toAdd, _ := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, _ := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// CNAME is older and owned by another host, AAAA should not be added
 	if len(toAdd) != 0 {
@@ -594,7 +594,7 @@ func TestReconcileAndValidate_AAAAVsAAAA_SameValue(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordAAAA, "2001:db8::1", "c1", now, false, "test-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Same record - no changes
 	if len(toAdd) != 0 {
@@ -615,7 +615,7 @@ func TestReconcileAndValidate_AAAAVsAAAA_DifferentOwner(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordAAAA, "2001:db8::1", "c2", now, false, "test-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Older desired wins
 	if len(toAdd) != 1 {
@@ -637,7 +637,7 @@ func TestReconcileAndValidate_CNAMEVsAAndAAAA(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordAAAA, "2001:db8::1", "c3", now, false, "test-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// CNAME with force should evict both A and AAAA
 	if len(toAdd) != 1 {
@@ -658,7 +658,7 @@ func TestReconcileAndValidate_CNAMEVsCNAME_Eviction(t *testing.T) {
 		makeRecordIntent("alias.example.com", domain.RecordCNAME, "old-target.example.com", "c2", now, false, "test-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Force CNAME should replace existing CNAME
 	if len(toAdd) != 1 {
@@ -676,7 +676,7 @@ func TestReconcileAndValidate_CNAMEVsCNAME_IdenticalNoOp(t *testing.T) {
 	desired := []*domain.RecordIntent{intent}
 	actual := []*domain.RecordIntent{intent}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	if len(toAdd) != 0 {
 		t.Errorf("expected 0 records to add, got %d", len(toAdd))
@@ -696,7 +696,7 @@ func TestReconcileAndValidate_AVsA_ForceEviction(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordA, "192.168.1.2", "c2", now.Add(-5*time.Hour), false, "test-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	if len(toAdd) != 1 {
 		t.Errorf("expected 1 record to add, got %d", len(toAdd))
@@ -718,7 +718,7 @@ func TestReconcileAndValidate_MultipleDesiredWithEvictions(t *testing.T) {
 		makeRecordIntent("app2.example.com", domain.RecordCNAME, "old2.example.com", "c4", now, false, "test-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Both A records should win over CNAMEs (older)
 	if len(toAdd) != 2 {
@@ -880,7 +880,7 @@ func TestReconcileAndValidate_AVsA_NewerALoses(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordA, "192.168.1.2", "c2", now.Add(-5*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Existing A is older but owned by other host - desired newer should NOT win
 	if len(toAdd) != 0 {
@@ -902,7 +902,7 @@ func TestReconcileAndValidate_AAAAVsAAAA_NewerAAAALoses(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordAAAA, "2001:db8::1", "c2", now.Add(-5*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Existing AAAA is older but owned by other host - desired newer should NOT win
 	if len(toAdd) != 0 {
@@ -924,7 +924,7 @@ func TestReconcileAndValidate_AVsCNAME_ALoses(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target.example.com", "c2", now.Add(-5*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Existing CNAME is older (owned by other host) - A should not be added
 	if len(toAdd) != 0 {
@@ -946,7 +946,7 @@ func TestReconcileAndValidate_CNAMEVsCNAME_NewerCNAMELoses(t *testing.T) {
 		makeRecordIntent("alias.example.com", domain.RecordCNAME, "old-target.example.com", "c2", now.Add(-5*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Existing CNAME is older (owned by other host) - new CNAME should not be added
 	if len(toAdd) != 0 {
@@ -969,7 +969,7 @@ func TestReconcileAndValidate_CNAMEVsAAndAAAA_CNAMELoses(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordAAAA, "2001:db8::1", "c3", now.Add(-5*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Existing address records are older (owned by other host) - CNAME should not be added
 	if len(toAdd) != 0 {
@@ -993,7 +993,7 @@ func TestReconcileAndValidate_ValidationFailure(t *testing.T) {
 		makeRecordIntent("loop.example.com", domain.RecordCNAME, "app.example.com", "c2", now, false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Should skip the CNAME because it creates a cycle
 	if len(toAdd) != 0 {
@@ -1014,7 +1014,7 @@ func TestReconcileAndValidate_StaleRecordOtherHost(t *testing.T) {
 		makeRecordIntent("stale.example.com", domain.RecordA, "192.168.1.99", "c2", now, false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Should not remove record owned by other host
 	if len(toRemove) != 0 {
@@ -1038,7 +1038,7 @@ func TestReconcileAndValidate_AWithDifferentValue(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordA, "192.168.1.1", "c2", now.Add(-5*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Should add new A - different values can coexist
 	if len(toAdd) != 1 {
@@ -1060,7 +1060,7 @@ func TestReconcileAndValidate_CNAMEOlderThanAllAddress(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordAAAA, "2001:db8::1", "c3", now, false, "test-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// CNAME is older than all address records - should evict them
 	if len(toAdd) != 1 {
@@ -1083,7 +1083,7 @@ func TestReconcileAndValidate_CNAMEVsAddressNotOlderThanAll(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordAAAA, "2001:db8::1", "c3", now.Add(-10*time.Hour), false, "other-host"), // Older than CNAME
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// CNAME is NOT older than all address records - should not evict
 	if len(toAdd) != 0 {
@@ -1229,7 +1229,7 @@ func TestReconcileAndValidate_CrossHostAVsCNAME_AEvictsCNAME(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target.example.com", "c2", now, false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// A is older than CNAME and should evict it
 	if len(toAdd) != 1 {
@@ -1251,7 +1251,7 @@ func TestReconcileAndValidate_CrossHostAVsCNAME_ALoses(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target.example.com", "c2", now.Add(-10*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// A is newer than CNAME - A loses, no changes
 	if len(toAdd) != 0 {
@@ -1273,7 +1273,7 @@ func TestReconcileAndValidate_CrossHostAAAAVsCNAME_AAAAEvictsCNAME(t *testing.T)
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target.example.com", "c2", now, false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// AAAA is older than CNAME and should evict it
 	if len(toAdd) != 1 {
@@ -1295,7 +1295,7 @@ func TestReconcileAndValidate_CrossHostAAAAVsCNAME_AAAALoses(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target.example.com", "c2", now.Add(-10*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// AAAA is newer than CNAME - AAAA loses
 	if len(toAdd) != 0 {
@@ -1317,7 +1317,7 @@ func TestReconcileAndValidate_CrossHostAVsA_AEvictsA(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordA, "192.168.1.1", "c2", now, false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Desired A is older, should evict the actual A
 	if len(toAdd) != 1 {
@@ -1339,7 +1339,7 @@ func TestReconcileAndValidate_CrossHostAVsA_ALoses(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordA, "192.168.1.1", "c2", now.Add(-10*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Desired A is newer - it loses to the older actual A
 	if len(toAdd) != 0 {
@@ -1361,7 +1361,7 @@ func TestReconcileAndValidate_CrossHostAAAAVsAAAA_AAAAEvictsAAAA(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordAAAA, "2001:db8::1", "c2", now, false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Desired AAAA is older, should evict the actual AAAA
 	if len(toAdd) != 1 {
@@ -1383,7 +1383,7 @@ func TestReconcileAndValidate_CrossHostAAAAVsAAAA_AAAALoses(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordAAAA, "2001:db8::1", "c2", now.Add(-10*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Desired AAAA is newer - it loses to the older actual AAAA
 	if len(toAdd) != 0 {
@@ -1406,7 +1406,7 @@ func TestReconcileAndValidate_CrossHostCNAMEVsAAndAAAA_CNAMEEvicts(t *testing.T)
 		makeRecordIntent("app.example.com", domain.RecordAAAA, "2001:db8::1", "c3", now, false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// CNAME is older than all address records, should evict both
 	if len(toAdd) != 1 {
@@ -1428,7 +1428,7 @@ func TestReconcileAndValidate_CrossHostCNAMEVsCNAME_CNAMEEvicts(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target2.example.com", "c2", now, false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Desired CNAME is older, should evict the actual CNAME
 	if len(toAdd) != 1 {
@@ -1450,7 +1450,7 @@ func TestReconcileAndValidate_CrossHostCNAMEVsCNAME_CNAMELoses(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target2.example.com", "c2", now.Add(-10*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Desired CNAME is newer - it loses to the older actual CNAME
 	if len(toAdd) != 0 {
@@ -1472,7 +1472,7 @@ func TestReconcileAndValidate_ForceEvictsCrossHost(t *testing.T) {
 		makeRecordIntent("app.example.com", domain.RecordCNAME, "target.example.com", "c2", now.Add(-10*time.Hour), false, "other-host"),
 	}
 
-	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, reconcileLogger())
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
 
 	// Force should evict even though the actual record is older
 	if len(toAdd) != 1 {
@@ -1480,5 +1480,90 @@ func TestReconcileAndValidate_ForceEvictsCrossHost(t *testing.T) {
 	}
 	if len(toRemove) != 1 {
 		t.Errorf("expected 1 record to remove, got %d", len(toRemove))
+	}
+}
+
+// ============================================================================
+// Cross-host orphan GC tests (heartbeat-driven)
+// ============================================================================
+
+func TestReconcileAndValidate_GCRemovesOrphanFromDeadHost(t *testing.T) {
+	cfg := reconcileConfig() // Hostname: test-host
+	now := time.Now()
+	desired := []*domain.RecordIntent{}
+	// A record owned by a host that is NOT in the live set.
+	actual := []*domain.RecordIntent{
+		makeRecordIntent("ghost.example.com", domain.RecordA, "192.168.1.9", "c1", now.Add(-10*time.Hour), false, "dead-host"),
+	}
+	liveHosts := map[string]struct{}{"test-host": {}} // dead-host absent
+
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, liveHosts, reconcileLogger())
+
+	if len(toAdd) != 0 {
+		t.Errorf("expected 0 records to add, got %d", len(toAdd))
+	}
+	if len(toRemove) != 1 {
+		t.Fatalf("expected 1 orphaned record to remove, got %d", len(toRemove))
+	}
+	if toRemove[0].Hostname != "dead-host" {
+		t.Errorf("expected removed record to be owned by dead-host, got %q", toRemove[0].Hostname)
+	}
+}
+
+func TestReconcileAndValidate_GCKeepsRecordsFromLiveHost(t *testing.T) {
+	cfg := reconcileConfig()
+	now := time.Now()
+	desired := []*domain.RecordIntent{}
+	actual := []*domain.RecordIntent{
+		makeRecordIntent("peer.example.com", domain.RecordA, "192.168.1.8", "c1", now.Add(-10*time.Hour), false, "other-host"),
+	}
+	liveHosts := map[string]struct{}{"test-host": {}, "other-host": {}} // other-host alive
+
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, liveHosts, reconcileLogger())
+
+	if len(toAdd) != 0 {
+		t.Errorf("expected 0 records to add, got %d", len(toAdd))
+	}
+	if len(toRemove) != 0 {
+		t.Errorf("expected 0 records to remove for a live host, got %d", len(toRemove))
+	}
+}
+
+func TestReconcileAndValidate_GCDisabledKeepsForeignRecords(t *testing.T) {
+	cfg := reconcileConfig()
+	now := time.Now()
+	desired := []*domain.RecordIntent{}
+	actual := []*domain.RecordIntent{
+		makeRecordIntent("ghost.example.com", domain.RecordA, "192.168.1.9", "c1", now.Add(-10*time.Hour), false, "dead-host"),
+	}
+
+	// nil liveHosts => cross-host GC disabled; original conservative behavior.
+	toAdd, toRemove := ReconcileAndValidate(desired, actual, cfg, nil, reconcileLogger())
+
+	if len(toAdd) != 0 {
+		t.Errorf("expected 0 records to add, got %d", len(toAdd))
+	}
+	if len(toRemove) != 0 {
+		t.Errorf("expected 0 records to remove when GC disabled, got %d", len(toRemove))
+	}
+}
+
+func TestReconcileAndValidate_GCStillRemovesOwnStaleRecords(t *testing.T) {
+	cfg := reconcileConfig()
+	now := time.Now()
+	desired := []*domain.RecordIntent{}
+	// Our own record, no longer desired -> removed regardless of liveHosts.
+	actual := []*domain.RecordIntent{
+		makeRecordIntent("mine.example.com", domain.RecordA, "10.0.0.1", "c1", now.Add(-time.Hour), false, "test-host"),
+	}
+	liveHosts := map[string]struct{}{"test-host": {}}
+
+	_, toRemove := ReconcileAndValidate(desired, actual, cfg, liveHosts, reconcileLogger())
+
+	if len(toRemove) != 1 {
+		t.Fatalf("expected 1 own stale record to remove, got %d", len(toRemove))
+	}
+	if toRemove[0].Hostname != "test-host" {
+		t.Errorf("expected removed record to be our own, got %q", toRemove[0].Hostname)
 	}
 }

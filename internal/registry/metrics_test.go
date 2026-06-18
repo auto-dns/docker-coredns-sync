@@ -38,7 +38,7 @@ func TestEtcdRegistry_Metrics_EtcdErrorOnList(t *testing.T) {
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 		return nil, errors.New("etcd down")
 	}
-	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 0, testLogger())
 	m := &countingMetrics{}
 	reg.SetMetrics(m)
 
@@ -61,7 +61,7 @@ func TestEtcdRegistry_Metrics_LockFailureOnTimeout(t *testing.T) {
 	cfg := testConfig()
 	cfg.LockTimeout = 0.05
 	cfg.LockRetryInterval = 0.01
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 	m := &countingMetrics{}
 	reg.SetMetrics(m)
 
@@ -79,7 +79,7 @@ func TestEtcdRegistry_Metrics_UnsetIsNoop(t *testing.T) {
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 		return nil, errors.New("etcd down")
 	}
-	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 0, testLogger())
 
 	// No metrics set: must not panic.
 	if _, err := reg.List(context.Background()); err == nil {
