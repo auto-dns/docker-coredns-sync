@@ -18,6 +18,8 @@ type state interface {
 }
 
 type upstreamRegistry interface {
+	StartHeartbeat(ctx context.Context) error
+	GetLiveHostnames(ctx context.Context) (map[string]struct{}, error)
 	LockTransaction(ctx context.Context, key []string, fn func() error) error
 	List(ctx context.Context) ([]*domain.RecordIntent, error)
 	Register(ctx context.Context, record *domain.RecordIntent) error

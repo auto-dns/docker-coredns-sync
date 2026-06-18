@@ -92,21 +92,47 @@ func (m *mockState) WasMarkRemovedCalled() bool {
 }
 
 type mockRegistry struct {
-	mu                  sync.Mutex
-	lockTransactionFunc func(ctx context.Context, keys []string, fn func() error) error
-	listFunc            func(ctx context.Context) ([]*domain.RecordIntent, error)
-	registerFunc        func(ctx context.Context, record *domain.RecordIntent) error
-	removeFunc          func(ctx context.Context, record *domain.RecordIntent) error
-	closeFunc           func() error
+	mu                   sync.Mutex
+	startHeartbeatFunc   func(ctx context.Context) error
+	getLiveHostnamesFunc func(ctx context.Context) (map[string]struct{}, error)
+	lockTransactionFunc  func(ctx context.Context, keys []string, fn func() error) error
+	listFunc             func(ctx context.Context) ([]*domain.RecordIntent, error)
+	registerFunc         func(ctx context.Context, record *domain.RecordIntent) error
+	removeFunc           func(ctx context.Context, record *domain.RecordIntent) error
+	closeFunc            func() error
 
-	lockTransactionCalled bool
-	listCalled            bool
-	registerCalled        bool
-	removeCalled          bool
-	closeCalled           bool
+	startHeartbeatCalled   bool
+	getLiveHostnamesCalled bool
+	lockTransactionCalled  bool
+	listCalled             bool
+	registerCalled         bool
+	removeCalled           bool
+	closeCalled            bool
 
 	registeredRecords []*domain.RecordIntent
 	removedRecords    []*domain.RecordIntent
+}
+
+func (m *mockRegistry) StartHeartbeat(ctx context.Context) error {
+	m.mu.Lock()
+	m.startHeartbeatCalled = true
+	m.mu.Unlock()
+
+	if m.startHeartbeatFunc != nil {
+		return m.startHeartbeatFunc(ctx)
+	}
+	return nil
+}
+
+func (m *mockRegistry) GetLiveHostnames(ctx context.Context) (map[string]struct{}, error) {
+	m.mu.Lock()
+	m.getLiveHostnamesCalled = true
+	m.mu.Unlock()
+
+	if m.getLiveHostnamesFunc != nil {
+		return m.getLiveHostnamesFunc(ctx)
+	}
+	return nil, nil
 }
 
 func (m *mockRegistry) LockTransaction(ctx context.Context, keys []string, fn func() error) error {

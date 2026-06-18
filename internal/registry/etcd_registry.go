@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
@@ -15,20 +16,131 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+// heartbeatPrefix is where per-host liveness keys live. It is deliberately
+// outside the SkyDNS path_prefix so CoreDNS never sees these keys and List()
+// never parses them as DNS records.
+const heartbeatPrefix = "/docker-coredns-sync/heartbeat"
+
 type EtcdRegistry struct {
-	client   etcdClient
-	cfg      *config.EtcdConfig
-	hostname string
-	logger   zerolog.Logger
+	client       etcdClient
+	cfg          *config.EtcdConfig
+	hostname     string
+	heartbeatTTL int
+	logger       zerolog.Logger
+
+	hbMu     sync.Mutex
+	hbLease  clientv3.LeaseID
+	hbCancel context.CancelFunc
 }
 
-func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string, logger zerolog.Logger) *EtcdRegistry {
+func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string, heartbeatTTL int, logger zerolog.Logger) *EtcdRegistry {
 	return &EtcdRegistry{
-		client:   client,
-		cfg:      cfg,
-		hostname: hostname,
-		logger:   logger.With().Str("component", "etcd_registry").Logger(),
+		client:       client,
+		cfg:          cfg,
+		hostname:     hostname,
+		heartbeatTTL: heartbeatTTL,
+		logger:       logger.With().Str("component", "etcd_registry").Logger(),
 	}
+}
+
+func heartbeatKey(hostname string) string {
+	return fmt.Sprintf("%s/%s", heartbeatPrefix, hostname)
+}
+
+// StartHeartbeat publishes this host's liveness key under a lease and keeps the
+// lease alive for the lifetime of ctx. When heartbeats are disabled
+// (heartbeatTTL <= 0) it is a no-op. The presence of this key is how other
+// hosts know this host is still alive and that its records must not be GC'd.
+func (er *EtcdRegistry) StartHeartbeat(ctx context.Context) error {
+	if er.heartbeatTTL <= 0 {
+		er.logger.Info().Msg("heartbeat disabled (heartbeat_ttl <= 0); cross-host GC will not run")
+		return nil
+	}
+
+	leaseResp, err := er.client.Grant(ctx, int64(er.heartbeatTTL))
+	if err != nil {
+		return fmt.Errorf("grant heartbeat lease: %w", err)
+	}
+
+	key := heartbeatKey(er.hostname)
+	if _, err := er.client.Put(ctx, key, er.hostname, clientv3.WithLease(leaseResp.ID)); err != nil {
+		_, _ = er.client.Revoke(ctx, leaseResp.ID)
+		return fmt.Errorf("put heartbeat key %q: %w", key, err)
+	}
+
+	kaCtx, cancel := context.WithCancel(ctx)
+	kaCh, err := er.client.KeepAlive(kaCtx, leaseResp.ID)
+	if err != nil {
+		cancel()
+		_, _ = er.client.Delete(ctx, key)
+		_, _ = er.client.Revoke(ctx, leaseResp.ID)
+		return fmt.Errorf("keepalive heartbeat lease: %w", err)
+	}
+
+	er.hbMu.Lock()
+	er.hbLease = leaseResp.ID
+	er.hbCancel = cancel
+	er.hbMu.Unlock()
+
+	// Drain keepalive responses until cancel; presence keeps the lease alive.
+	go func() {
+		for range kaCh {
+		}
+	}()
+
+	er.logger.Info().Str("key", key).Int("ttl", er.heartbeatTTL).Msg("heartbeat started")
+	return nil
+}
+
+// stopHeartbeat cancels the keepalive and best-effort removes the liveness key.
+func (er *EtcdRegistry) stopHeartbeat() {
+	er.hbMu.Lock()
+	cancel := er.hbCancel
+	lease := er.hbLease
+	er.hbCancel = nil
+	er.hbLease = 0
+	er.hbMu.Unlock()
+
+	if cancel == nil {
+		return
+	}
+	cancel()
+
+	ctx, cancelTimeout := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelTimeout()
+	if _, err := er.client.Delete(ctx, heartbeatKey(er.hostname)); err != nil {
+		er.logger.Warn().Err(err).Msg("delete heartbeat key on shutdown")
+	}
+	if _, err := er.client.Revoke(ctx, lease); err != nil {
+		er.logger.Warn().Err(err).Msg("revoke heartbeat lease on shutdown")
+	}
+}
+
+// GetLiveHostnames returns the set of hostnames with a live heartbeat key.
+// It returns (nil, nil) when heartbeats are disabled, which callers must treat
+// as "cross-host GC disabled" — never as "every host is dead".
+func (er *EtcdRegistry) GetLiveHostnames(ctx context.Context) (map[string]struct{}, error) {
+	if er.heartbeatTTL <= 0 {
+		return nil, nil
+	}
+
+	base := heartbeatPrefix
+	resp, err := er.client.Get(ctx, base+"/", clientv3.WithPrefix(), clientv3.WithKeysOnly(), clientv3.WithSerializable())
+	if err != nil {
+		return nil, fmt.Errorf("list heartbeat keys under %q: %w", base, err)
+	}
+
+	live := make(map[string]struct{}, len(resp.Kvs))
+	for _, kv := range resp.Kvs {
+		hostname := strings.TrimPrefix(string(kv.Key), base+"/")
+		if hostname == "" {
+			continue
+		}
+		live[hostname] = struct{}{}
+	}
+	// This host is always considered live while it is reconciling.
+	live[er.hostname] = struct{}{}
+	return live, nil
 }
 
 // getNextIndexedKey generates a new etcd key for a record based on its fully qualified domain name (fqdn).
@@ -266,5 +378,6 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 }
 
 func (er *EtcdRegistry) Close() error {
+	er.stopHeartbeat()
 	return er.client.Close()
 }

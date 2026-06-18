@@ -733,3 +733,139 @@ func TestSyncEngine_Run_EventChannelClosed(t *testing.T) {
 	// Should continue running even after event channel closes
 	// until context is cancelled
 }
+
+func TestSyncEngine_Run_StartsHeartbeat(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return []*domain.RecordIntent{}
+		},
+	}
+	reg := &mockRegistry{}
+	cfg := testAppConfig()
+	cfg.PollInterval = 10
+
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	engine.Run(ctx)
+
+	reg.mu.Lock()
+	called := reg.startHeartbeatCalled
+	reg.mu.Unlock()
+	if !called {
+		t.Error("expected StartHeartbeat to be called on Run")
+	}
+}
+
+func TestSyncEngine_Run_GCsOrphanedRecords(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return []*domain.RecordIntent{} // we desire nothing
+		},
+	}
+
+	rec, _ := domain.NewA("ghost.example.com", "192.168.1.9")
+	orphan := &domain.RecordIntent{
+		ContainerId:   "dead-container",
+		ContainerName: "dead-app",
+		Created:       time.Now().Add(-time.Hour),
+		Hostname:      "dead-host", // owner not in live set
+		Record:        rec,
+	}
+
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{orphan}, nil
+		},
+		getLiveHostnamesFunc: func(ctx context.Context) (map[string]struct{}, error) {
+			return map[string]struct{}{"test-host": {}}, nil // dead-host absent
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() { engine.Run(ctx) }()
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	if !reg.WasRemoveCalled() {
+		t.Fatal("expected orphaned record to be removed via cross-host GC")
+	}
+	removed := reg.GetRemovedRecords()
+	if len(removed) != 1 || removed[0].Hostname != "dead-host" {
+		t.Errorf("expected exactly the dead-host record removed, got %+v", removed)
+	}
+}
+
+func TestSyncEngine_Run_GetLiveHostnamesError(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return []*domain.RecordIntent{}
+		},
+	}
+
+	rec, _ := domain.NewA("ghost.example.com", "192.168.1.9")
+	orphan := &domain.RecordIntent{
+		ContainerId:   "dead-container",
+		ContainerName: "dead-app",
+		Created:       time.Now().Add(-time.Hour),
+		Hostname:      "dead-host",
+		Record:        rec,
+	}
+
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{orphan}, nil
+		},
+		getLiveHostnamesFunc: func(ctx context.Context) (map[string]struct{}, error) {
+			return nil, errors.New("etcd unavailable")
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() { engine.Run(ctx) }()
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	// On liveHosts error, GC must be skipped: the foreign record stays.
+	if reg.WasRemoveCalled() {
+		t.Error("expected no removals when GetLiveHostnames fails (GC disabled this tick)")
+	}
+}

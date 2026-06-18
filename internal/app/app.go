@@ -58,7 +58,7 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 
-	reg := registry.NewEtcdRegistry(etcdClient, &cfg.Etcd, cfg.App.Hostname, logger)
+	reg := registry.NewEtcdRegistry(etcdClient, &cfg.Etcd, cfg.App.Hostname, cfg.App.HeartbeatTTL, logger)
 	memState := state.NewMemoryState()
 	engine := core.NewSyncEngine(logger, &cfg.App, gen, reg, memState)
 

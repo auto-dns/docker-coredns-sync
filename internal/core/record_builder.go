@@ -70,12 +70,20 @@ func GetContainerRecordIntents(event domain.ContainerEvent, cfg *config.AppConfi
 			force = *labeledRecord.Force
 		}
 
+		// TTL: per-record label override wins, otherwise the configured default
+		// (0 = unset; CoreDNS applies its own default).
+		ttl := cfg.RecordTTL
+		if labeledRecord.TTL != nil {
+			ttl = *labeledRecord.TTL
+		}
+
 		intent := &domain.RecordIntent{
 			ContainerId:   event.Container.Id,
 			ContainerName: event.Container.Name,
 			Created:       event.Container.Created,
 			Hostname:      cfg.Hostname,
 			Force:         force,
+			TTL:           ttl,
 			Record:        rec,
 		}
 		intents = append(intents, intent)

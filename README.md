@@ -10,6 +10,8 @@
 - Multiple domain support per container
 - Prevents CNAME cycles
 - Automatically removes stale records
+- **Per-record TTL** control via config default or label override
+- **Multi-host aware**: each host publishes a liveness heartbeat and garbage-collects records left behind by hosts that are permanently gone
 - Graceful shutdown support
 - Flexible configuration via **flags**, **env vars**, and **config file**
 - Supports both **YAML** and **JSON** config formats
@@ -51,7 +53,12 @@ coredns.cname.app.value=target.example.com
 ### Optional
 
 - `coredns.force=true` — Force registration for all records in the container
-- `coredns.a.name.force=true` — Force a specific A record
+- `coredns.a.force=true` — Force a specific A record
+- `coredns.a.ttl=300` — Per-record TTL in seconds. Overrides the `app.record_ttl`
+  default. For aliased records use `coredns.a.<alias>.ttl` (e.g.
+  `coredns.a.proxy.ttl=60`). A non-numeric value is ignored. When neither a
+  label nor `app.record_ttl` sets a TTL, the field is omitted and CoreDNS
+  applies its own default.
 
 ---
 
@@ -97,12 +104,37 @@ Configuration values can be provided via:
 | `--app.host-ip` | `app.host_ip` | `DOCKER_COREDNS_SYNC_APP_HOST_IP` | `string` | `"127.0.0.1"` | IP to use for A records |
 | `--app.hostname` | `app.hostname` | `DOCKER_COREDNS_SYNC_APP_HOSTNAME` | `string` | `"your-hostname"` | Unique logical hostname for this node |
 | `--app.poll-interval` | `app.poll_interval` | `DOCKER_COREDNS_SYNC_APP_POLL_INTERVAL` | `int` | `5` | How often to reconcile the registry (in seconds) |
+| `--app.record-ttl` | `app.record_ttl` | `DOCKER_COREDNS_SYNC_APP_RECORD_TTL` | `uint` | `0` | Default DNS record TTL in seconds (`0` = unset; CoreDNS uses its own default). Overridable per record via a `coredns.<kind>[.<alias>].ttl` label |
+| `--app.heartbeat-ttl` | `app.heartbeat_ttl` | `DOCKER_COREDNS_SYNC_APP_HEARTBEAT_TTL` | `int` | `30` | Lease TTL (seconds) for this host's liveness key. Doubles as the grace period before another host garbage-collects records owned by a host that stopped renewing. `0` or negative disables heartbeats **and** cross-host GC |
 | *(config file only)* | `etcd.endpoints` | `DOCKER_COREDNS_SYNC_ETCD_ENDPOINTS` | `[]string` | `["http://localhost:2379"]` | etcd endpoint URLs (supports multiple for cluster) |
 | `--etcd.path-prefix` | `etcd.path_prefix` | `DOCKER_COREDNS_SYNC_ETCD_PATH_PREFIX` | `string` | `"/skydns"` | etcd base path |
 | `--etcd.lock-ttl` | `etcd.lock_ttl` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TTL` | `float` | `5.0` | Lock lease time-to-live in seconds |
 | `--etcd.lock-timeout` | `etcd.lock_timeout` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TIMEOUT` | `float` | `2.0` | Lock acquisition timeout |
 | `--etcd.lock-retry-interval` | `etcd.lock_retry_interval` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_RETRY_INTERVAL` | `float` | `0.1` | Retry interval for lock acquisition |
 | `--log.level` | `log.level` | `DOCKER_COREDNS_SYNC_LOG_LEVEL` | `string` | `"INFO"` | Logging level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`) |
+
+---
+
+## Multi-host Behavior & Record Garbage Collection
+
+Each instance scopes ownership of etcd records by its `app.hostname`. A host only
+removes records it owns — except for orphan cleanup described below.
+
+While running, every instance publishes a lease-backed **heartbeat** key (outside
+`etcd.path_prefix`, so CoreDNS never sees it) and keeps it alive. The lease TTL is
+`app.heartbeat_ttl`. During reconciliation a host treats any record whose owner has
+**no live heartbeat** as an orphan and garbage-collects it. The heartbeat lease TTL
+is the grace period: a host must be silent for longer than `heartbeat_ttl` before its
+records become eligible for removal, so a brief outage or restart will **not** cause
+another host to delete its records.
+
+Setting `app.heartbeat_ttl` to `0` (or a negative value) disables both the heartbeat
+and cross-host GC, restoring the original conservative behavior (a host only ever
+removes its own stale records).
+
+> **Upgrading a multi-host fleet:** roll out this version to all hosts together. A host
+> running an older version that doesn't publish a heartbeat will look "dead" to upgraded
+> hosts, which would then GC its records.
 
 ---
 
@@ -131,6 +163,8 @@ app:
   host_ipv6: fd20:0:1::100
   hostname: homeserver
   poll_interval: 5
+  record_ttl: 0      # 0 = let CoreDNS apply its default; override per record with a .ttl label
+  heartbeat_ttl: 30  # liveness lease + cross-host GC grace period; 0 disables
 
 log:
   level: INFO

@@ -362,6 +362,123 @@ func TestEtcdRecord_JSONFieldNames(t *testing.T) {
 	}
 }
 
+func TestMarshalEtcdValue_TTLOmittedWhenZero(t *testing.T) {
+	rec, _ := domain.NewA("app.example.com", "192.168.1.1")
+	ri := &domain.RecordIntent{
+		ContainerId:   "abc123",
+		ContainerName: "my-app",
+		Created:       time.Now(),
+		Hostname:      "docker-host",
+		Record:        rec,
+		TTL:           0,
+	}
+
+	result, err := marshalEtcdValue(ri)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if contains(result, `"ttl"`) {
+		t.Errorf("expected ttl to be omitted when zero, got: %s", result)
+	}
+}
+
+func TestMarshalEtcdValue_TTLPresentWhenSet(t *testing.T) {
+	rec, _ := domain.NewA("app.example.com", "192.168.1.1")
+	ri := &domain.RecordIntent{
+		ContainerId:   "abc123",
+		ContainerName: "my-app",
+		Created:       time.Now(),
+		Hostname:      "docker-host",
+		Record:        rec,
+		TTL:           300,
+	}
+
+	result, err := marshalEtcdValue(ri)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var wire etcdRecord
+	if err := json.Unmarshal([]byte(result), &wire); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if wire.TTL != 300 {
+		t.Errorf("expected TTL 300, got %d", wire.TTL)
+	}
+	if !contains(result, `"ttl":300`) {
+		t.Errorf("expected ttl field in JSON, got: %s", result)
+	}
+}
+
+func TestUnmarshalEtcdValue_TTL(t *testing.T) {
+	key := "/skydns/com/example/app/x1"
+	value := `{
+		"host": "192.168.1.1",
+		"ttl": 120,
+		"record_type": "A",
+		"owner_hostname": "docker-host",
+		"owner_container_id": "abc123",
+		"owner_container_name": "my-app",
+		"created": "2024-01-15T10:30:00Z",
+		"force": false
+	}`
+
+	result, err := unmarshalEtcdValue(key, value, "/skydns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TTL != 120 {
+		t.Errorf("expected TTL 120, got %d", result.TTL)
+	}
+}
+
+func TestUnmarshalEtcdValue_TTLDefaultsToZeroWhenAbsent(t *testing.T) {
+	// Records written before TTL support omit the field; they must still parse.
+	key := "/skydns/com/example/app/x1"
+	value := `{
+		"host": "192.168.1.1",
+		"record_type": "A",
+		"owner_hostname": "docker-host",
+		"owner_container_id": "abc123",
+		"owner_container_name": "my-app",
+		"created": "2024-01-15T10:30:00Z",
+		"force": false
+	}`
+
+	result, err := unmarshalEtcdValue(key, value, "/skydns")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.TTL != 0 {
+		t.Errorf("expected TTL 0 for legacy record, got %d", result.TTL)
+	}
+}
+
+func TestMarshalUnmarshal_TTLRoundtrip(t *testing.T) {
+	rec, _ := domain.NewA("app.example.com", "192.168.1.1")
+	original := &domain.RecordIntent{
+		ContainerId:   "abc123",
+		ContainerName: "my-app",
+		Created:       time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC),
+		Hostname:      "docker-host",
+		Record:        rec,
+		TTL:           600,
+	}
+
+	marshaled, err := marshalEtcdValue(original)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+	key := keyBaseForFQDN("/skydns", "app.example.com") + "/x1"
+	result, err := unmarshalEtcdValue(key, marshaled, "/skydns")
+	if err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+	if result.TTL != original.TTL {
+		t.Errorf("TTL mismatch: %d vs %d", result.TTL, original.TTL)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }

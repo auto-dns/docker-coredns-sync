@@ -106,6 +106,46 @@ func TestRecordIntent_Key_SameForIdentical(t *testing.T) {
 	}
 }
 
+func TestRecordIntent_Key_DiffersByTTL(t *testing.T) {
+	now := time.Now()
+	rec, _ := NewA("app.example.com", "192.168.1.1")
+
+	base := RecordIntent{
+		ContainerId:   "container1",
+		ContainerName: "app1",
+		Created:       now,
+		Hostname:      "host1",
+		Force:         false,
+		Record:        rec,
+	}
+	withTTL := base
+	withTTL.TTL = 300
+
+	if base.Key() == withTTL.Key() {
+		t.Errorf("expected keys to differ when TTL differs so a TTL-only change self-heals: %q", base.Key())
+	}
+}
+
+func TestRecordIntent_Equal_DifferentTTL(t *testing.T) {
+	now := time.Now()
+	rec, _ := NewA("app.example.com", "192.168.1.1")
+
+	ri1 := RecordIntent{
+		ContainerId:   "container1",
+		ContainerName: "app1",
+		Created:       now,
+		Hostname:      "host1",
+		Record:        rec,
+		TTL:           60,
+	}
+	ri2 := ri1
+	ri2.TTL = 120
+
+	if ri1.Equal(ri2) {
+		t.Error("expected RecordIntents with different TTL to not be equal")
+	}
+}
+
 func TestRecordIntent_Equal_AllFieldsMatch(t *testing.T) {
 	now := time.Now()
 	rec, _ := NewA("app.example.com", "192.168.1.1")

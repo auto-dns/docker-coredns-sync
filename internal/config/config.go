@@ -24,6 +24,15 @@ type AppConfig struct {
 	HostIPv6          string `mapstructure:"host_ipv6"`
 	Hostname          string `mapstructure:"hostname"`
 	PollInterval      int    `mapstructure:"poll_interval"`
+	// RecordTTL is the default DNS record TTL in seconds. Zero means "unset"
+	// (the ttl field is omitted from the etcd value and CoreDNS applies its
+	// own default). A per-record `coredns.<kind>[.<alias>].ttl` label overrides it.
+	RecordTTL uint32 `mapstructure:"record_ttl"`
+	// HeartbeatTTL is the lease TTL in seconds for this host's liveness key.
+	// It doubles as the grace period before another host may garbage-collect
+	// records owned by a host that has stopped renewing. Zero (or negative)
+	// disables heartbeats and cross-host GC entirely.
+	HeartbeatTTL int `mapstructure:"heartbeat_ttl"`
 }
 
 // EtcdConfig holds etcd-related configuration.
@@ -87,6 +96,8 @@ func initConfig() error {
 	viper.SetDefault("app.host_ipv6", "")
 	viper.SetDefault("app.hostname", "")
 	viper.SetDefault("app.poll_interval", 5)
+	viper.SetDefault("app.record_ttl", 0)
+	viper.SetDefault("app.heartbeat_ttl", 30)
 	viper.SetDefault("etcd.endpoints", []string{"http://localhost:2379"})
 	viper.SetDefault("etcd.path_prefix", "/skydns")
 	viper.SetDefault("etcd.lock_ttl", 5.0)
