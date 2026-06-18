@@ -45,6 +45,17 @@ func TestStatus_Ready_StaleReconcile(t *testing.T) {
 	}
 }
 
+func TestStatus_Ready_DryRunNeverReady(t *testing.T) {
+	s := NewStatus(time.Minute)
+	s.SetDryRun(true)
+	s.SetDockerConnected(true)
+	s.RecordReconcile(nil) // even a "successful" pass must not flip to ready
+
+	if ready, reason := s.Ready(); ready {
+		t.Errorf("expected dry-run to never be ready, got ready (reason=%q)", reason)
+	}
+}
+
 func TestStatus_RecordReconcile_ErrorDoesNotRefresh(t *testing.T) {
 	s := NewStatus(time.Minute)
 	s.SetDockerConnected(true)

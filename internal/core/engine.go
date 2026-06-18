@@ -116,15 +116,23 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 					}
 					return nil
 				}
+				var writeErrs int
 				for _, rec := range toRemove {
 					if err := se.reg.Remove(ctx, rec); err != nil {
+						writeErrs++
 						se.logger.Error().Err(err).Msg("Error removing record")
 					}
 				}
 				for _, rec := range toAdd {
 					if err := se.reg.Register(ctx, rec); err != nil {
+						writeErrs++
 						se.logger.Error().Err(err).Msg("Error registering record")
 					}
+				}
+				if writeErrs > 0 {
+					// Surface write failures so the reconcile pass is not
+					// reported as successful (e.g. to readiness).
+					return fmt.Errorf("%d record write(s) failed during reconciliation", writeErrs)
 				}
 				return nil
 			})

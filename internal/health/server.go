@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -70,8 +71,19 @@ func (s *Server) Start(ctx context.Context) {
 	}()
 	go func() {
 		s.logger.Info().Str("addr", s.listener.Addr().String()).Msg("Starting health/readiness server")
-		if err := s.srv.Serve(s.listener); err != nil && err != http.ErrServerClosed {
+		if err := s.srv.Serve(s.listener); err != nil &&
+			!errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 			s.logger.Error().Err(err).Msg("health server error")
 		}
 	}()
+}
+
+// Close releases the server's listener. It is safe to call whether or not
+// Start has run, and is a no-op if the listener is already closed (e.g. by a
+// graceful ctx-driven shutdown).
+func (s *Server) Close() error {
+	if err := s.listener.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		return err
+	}
+	return nil
 }

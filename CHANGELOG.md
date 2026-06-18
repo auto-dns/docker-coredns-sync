@@ -38,8 +38,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the backoff resets after a healthy connection, and a closed error channel
   triggers a reconnect rather than a silent stall. (#8)
 - The health server now fails fast at startup if its listen address cannot be
-  bound, instead of logging and continuing without endpoints. In dry-run mode
-  readiness reports not-ready, since no records are applied. (#9, #10)
+  bound, instead of logging and continuing without endpoints. Readiness reports
+  not-ready in dry-run mode and when record writes to etcd fail (previously a
+  pass with failing writes was reported as successful). (#8, #9, #10)
+- Resync pruning of containers missing after a reconnect is debounced (a
+  container must be absent for two consecutive resyncs) so a container that is
+  only transiently missing from a single snapshot is not removed. (#8)
 
 ## [0.6.1] - 2026-06-17
 

@@ -15,6 +15,7 @@ type Status struct {
 	lastReconcileSuccess time.Time
 	lastReconcileErr     error
 	readyThreshold       time.Duration
+	dryRun               bool
 
 	// now is overridable in tests.
 	now func() time.Time
@@ -36,6 +37,14 @@ func (s *Status) SetDockerConnected(connected bool) {
 	s.mu.Unlock()
 }
 
+// SetDryRun marks the daemon as running in dry-run mode, in which it applies no
+// records and therefore never reports ready.
+func (s *Status) SetDryRun(dryRun bool) {
+	s.mu.Lock()
+	s.dryRun = dryRun
+	s.mu.Unlock()
+}
+
 // RecordReconcile records the outcome of a reconciliation pass. A nil error
 // marks the pass as successful and refreshes the readiness timestamp.
 func (s *Status) RecordReconcile(err error) {
@@ -54,6 +63,9 @@ func (s *Status) Ready() (bool, string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	if s.dryRun {
+		return false, "dry-run mode: records are not applied"
+	}
 	if !s.dockerConnected {
 		return false, "docker event stream not connected"
 	}

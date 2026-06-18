@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -667,6 +668,172 @@ func TestDockerGenerator_Subscribe_ConnectionObserver(t *testing.T) {
 	}
 	if states[len(states)-1] != false {
 		t.Errorf("expected final observed state to be connected=false, got %v", states)
+	}
+}
+
+func TestStableConnection(t *testing.T) {
+	now := time.Now()
+	if stableConnection(time.Time{}, now, time.Second) {
+		t.Error("a never-connected (zero) time should not be stable")
+	}
+	if !stableConnection(now.Add(-2*time.Second), now, time.Second) {
+		t.Error("a connection up for 2s should be stable with a 1s threshold")
+	}
+	if stableConnection(now.Add(-500*time.Millisecond), now, time.Second) {
+		t.Error("a connection up for 500ms should not be stable with a 1s threshold")
+	}
+}
+
+func TestDockerGenerator_Subscribe_ResyncOnEachReconnect(t *testing.T) {
+	var connects int32
+	mock := newMockDockerClient()
+	mock.containerListFunc = func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+		return []container.Summary{{ID: "c1", Names: []string{"/c1"}, Created: time.Now().Unix()}}, nil
+	}
+	mock.eventsFunc = func(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error) {
+		n := atomic.AddInt32(&connects, 1)
+		errCh := make(chan error)
+		if n == 1 {
+			eventCh := make(chan events.Message)
+			close(eventCh) // first stream drops -> reconnect
+			return eventCh, errCh
+		}
+		return make(chan events.Message), errCh // second stays open
+	}
+
+	gen := fastGenerator(mock)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ch, err := gen.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	resyncCount := 0
+	for ev := range ch {
+		if ev.EventType == domain.EventTypeResync {
+			resyncCount++
+			if resyncCount == 2 {
+				cancel()
+			}
+		}
+	}
+
+	if resyncCount < 2 {
+		t.Errorf("expected a resync event on each (re)connection, got %d", resyncCount)
+	}
+}
+
+func TestDockerGenerator_Subscribe_ConnectionObserverReconnectCycle(t *testing.T) {
+	var connects int32
+	mock := newMockDockerClient()
+	mock.eventsFunc = func(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error) {
+		n := atomic.AddInt32(&connects, 1)
+		errCh := make(chan error)
+		if n == 1 {
+			eventCh := make(chan events.Message)
+			close(eventCh) // drop the first connection -> reconnect
+			return eventCh, errCh
+		}
+		return make(chan events.Message), errCh // stays open
+	}
+
+	var mu sync.Mutex
+	var states []bool
+	gen := fastGenerator(mock, WithConnectionObserver(func(connected bool) {
+		mu.Lock()
+		states = append(states, connected)
+		mu.Unlock()
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := gen.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Wait for the reconnect to happen, then cancel.
+	for i := 0; i < 200; i++ {
+		if atomic.LoadInt32(&connects) >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	for range ch {
+	}
+
+	// Expect at least true -> false -> true across the disconnect/reconnect.
+	mu.Lock()
+	defer mu.Unlock()
+	if !containsSubsequence(states, []bool{true, false, true}) {
+		t.Errorf("expected observer to see true->false->true across reconnect, got %v", states)
+	}
+}
+
+func containsSubsequence(haystack, needle []bool) bool {
+	i := 0
+	for _, v := range haystack {
+		if v == needle[i] {
+			i++
+			if i == len(needle) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func TestDockerGenerator_Subscribe_ZeroTimestampDoesNotRewindSince(t *testing.T) {
+	var connects int32
+	var mu sync.Mutex
+	var secondSince string
+
+	mock := newMockDockerClient()
+	mock.eventsFunc = func(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error) {
+		n := atomic.AddInt32(&connects, 1)
+		errCh := make(chan error)
+		if n == 1 {
+			eventCh := make(chan events.Message, 1)
+			// A zero-timestamp event must NOT rewind `since` to the epoch.
+			eventCh <- events.Message{
+				ID: "c", Status: "start", TimeNano: 0,
+				Actor: events.Actor{Attributes: map[string]string{"name": "app"}},
+			}
+			close(eventCh) // -> reconnect
+			return eventCh, errCh
+		}
+		mu.Lock()
+		secondSince = options.Since
+		mu.Unlock()
+		return make(chan events.Message), errCh
+	}
+
+	gen := fastGenerator(mock)
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := gen.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for i := 0; i < 200; i++ {
+		if atomic.LoadInt32(&connects) >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	for range ch {
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if secondSince == "" {
+		t.Fatal("expected a Since value on the second connection")
+	}
+	if strings.HasPrefix(secondSince, "1970") {
+		t.Errorf("expected Since not to be rewound to the epoch, got %q", secondSince)
 	}
 }
 

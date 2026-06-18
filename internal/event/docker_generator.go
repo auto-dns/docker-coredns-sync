@@ -109,7 +109,7 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 				return
 			}
 
-			connected, err := dw.runOnce(ctx, out, &since)
+			connectedAt, err := dw.runOnce(ctx, out, &since)
 
 			// A cancelled context is a clean shutdown, not a disconnect.
 			if ctx.Err() != nil {
@@ -123,9 +123,11 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 				dw.logger.Warn().Dur("backoff", backoff).Msg("Docker event stream closed; reconnecting after backoff")
 			}
 
-			// A drop after a healthy connection should retry quickly, so reset
-			// the backoff once we have actually connected at least once.
-			if connected {
+			// Only reset the backoff after a connection that stayed up long
+			// enough to be considered healthy. A connection that connects then
+			// drops immediately keeps escalating the backoff, so a flapping
+			// daemon does not turn into a tight reconnect loop.
+			if stableConnection(connectedAt, time.Now(), dw.reconnectMax) {
 				backoff = dw.reconnectInitial
 			}
 
@@ -141,13 +143,14 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 
 // runOnce performs a single connection cycle: it lists current containers
 // (emitting detection events plus a resync event), then streams events until
-// the stream ends. It returns whether the connection was established, and an
-// error when the connection failed. It returns when ctx is cancelled (caller
-// detects this via ctx.Err()).
-func (dw *DockerGenerator) runOnce(ctx context.Context, out chan<- domain.ContainerEvent, since *time.Time) (bool, error) {
+// the stream ends. It returns the time the event stream connected (zero if it
+// never connected) and an error when the connection failed. It returns when
+// ctx is cancelled (caller detects this via ctx.Err()).
+func (dw *DockerGenerator) runOnce(ctx context.Context, out chan<- domain.ContainerEvent, since *time.Time) (time.Time, error) {
+	var notConnected time.Time
 	containers, err := dw.cli.ContainerList(ctx, container.ListOptions{All: false})
 	if err != nil {
-		return false, fmt.Errorf("listing containers: %w", err)
+		return notConnected, fmt.Errorf("listing containers: %w", err)
 	}
 	runningIds := make([]string, 0, len(containers))
 	for _, c := range containers {
@@ -155,7 +158,7 @@ func (dw *DockerGenerator) runOnce(ctx context.Context, out chan<- domain.Contai
 		select {
 		case out <- fromContainerSummary(c):
 		case <-ctx.Done():
-			return false, nil
+			return notConnected, nil
 		}
 	}
 	// Tell the engine the full running set so it can prune containers that
@@ -163,7 +166,7 @@ func (dw *DockerGenerator) runOnce(ctx context.Context, out chan<- domain.Contai
 	select {
 	case out <- domain.ContainerEvent{EventType: domain.EventTypeResync, RunningContainerIds: runningIds}:
 	case <-ctx.Done():
-		return false, nil
+		return notConnected, nil
 	}
 
 	filterArgs := filters.NewArgs()
@@ -177,27 +180,28 @@ func (dw *DockerGenerator) runOnce(ctx context.Context, out chan<- domain.Contai
 		Since:   since.Format(time.RFC3339Nano),
 	}
 	eventCh, errCh := dw.cli.Events(ctx, options)
+	connectedAt := time.Now()
 	dw.setConnected(true)
 	dw.logger.Info().Msg("Subscribed to Docker events")
 
 	for {
 		select {
 		case <-ctx.Done():
-			return true, nil
+			return connectedAt, nil
 		case err, ok := <-errCh:
 			if !ok {
 				// The client closed the error channel; treat the stream as
 				// ended and reconnect rather than risk reading a now-dead
 				// event channel forever.
-				return true, nil
+				return connectedAt, nil
 			}
 			if err != nil {
-				return true, fmt.Errorf("docker events stream: %w", err)
+				return connectedAt, fmt.Errorf("docker events stream: %w", err)
 			}
 		case msg, ok := <-eventCh:
 			if !ok {
 				// Event stream closed; signal a reconnect.
-				return true, nil
+				return connectedAt, nil
 			}
 			// Track progress so a reconnect resumes from here. Guard against a
 			// zero/absent timestamp, which would otherwise rewind `since` to
@@ -220,10 +224,20 @@ func (dw *DockerGenerator) runOnce(ctx context.Context, out chan<- domain.Contai
 			select {
 			case out <- event:
 			case <-ctx.Done():
-				return true, nil
+				return connectedAt, nil
 			}
 		}
 	}
+}
+
+// stableConnection reports whether a connection established at connectedAt was
+// up long enough (>= minUptime) to be considered healthy. A zero connectedAt
+// means the connection was never established.
+func stableConnection(connectedAt, now time.Time, minUptime time.Duration) bool {
+	if connectedAt.IsZero() {
+		return false
+	}
+	return now.Sub(connectedAt) >= minUptime
 }
 
 // nextBackoff doubles the current backoff, capped at max.

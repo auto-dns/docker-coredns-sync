@@ -23,6 +23,7 @@ type App struct {
 	etcdClient   io.Closer
 	engine       *core.SyncEngine
 	healthServer *health.Server
+	status       *health.Status
 	logger       zerolog.Logger
 }
 
@@ -94,19 +95,20 @@ func NewWithFactories(cfg *config.Config, logger zerolog.Logger, factories Clien
 	}
 
 	if status != nil {
-		// In dry-run the daemon intentionally writes nothing, so it should not
-		// report itself as a ready, authoritative syncer.
+		// In dry-run the daemon intentionally writes nothing, so it never
+		// reports itself as a ready, authoritative syncer.
 		if cfg.App.DryRun {
+			status.SetDryRun(true)
 			logger.Warn().Msg("dry-run enabled: readiness will report not-ready (no records are applied)")
-		} else {
-			engine.SetReconcileReporter(status)
 		}
+		engine.SetReconcileReporter(status)
 		healthServer, err := health.NewServer(cfg.HTTP.ListenAddr, status, logger)
 		if err != nil {
 			_ = dockerClient.Close()
 			_ = etcdClient.Close()
 			return nil, err
 		}
+		app.status = status
 		app.healthServer = healthServer
 	}
 
@@ -139,6 +141,11 @@ func (a *App) Close() error {
 	if a.etcdClient != nil {
 		if e := a.etcdClient.Close(); e != nil {
 			err = errors.Join(err, fmt.Errorf("close etcd client: %w", e))
+		}
+	}
+	if a.healthServer != nil {
+		if e := a.healthServer.Close(); e != nil {
+			err = errors.Join(err, fmt.Errorf("close health server: %w", e))
 		}
 	}
 

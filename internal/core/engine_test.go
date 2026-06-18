@@ -750,6 +750,72 @@ func (r *recordingReporter) count() int {
 	return len(r.calls)
 }
 
+func (r *recordingReporter) sawError() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.calls {
+		if e != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSyncEngine_Run_WriteFailureReportedAsError(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+
+	rec, _ := domain.NewA("app.example.com", "192.168.1.1")
+	desiredIntents := []*domain.RecordIntent{
+		{
+			ContainerId:   "container-123",
+			ContainerName: "my-app",
+			Created:       time.Now(),
+			Hostname:      "test-host",
+			Record:        rec,
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return desiredIntents
+		},
+	}
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{}, nil
+		},
+		registerFunc: func(ctx context.Context, ri *domain.RecordIntent) error {
+			return errors.New("etcd write failed")
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+
+	reporter := &recordingReporter{}
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+	engine.SetReconcileReporter(reporter)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() { engine.Run(ctx) }()
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	if !reg.WasRegisterCalled() {
+		t.Fatal("expected Register to be attempted")
+	}
+	if !reporter.sawError() {
+		t.Error("expected a failed write to be reported as a non-nil reconcile error")
+	}
+}
+
 func TestSyncEngine_Run_DryRunSkipsWrites(t *testing.T) {
 	eventCh := make(chan domain.ContainerEvent)
 	close(eventCh)

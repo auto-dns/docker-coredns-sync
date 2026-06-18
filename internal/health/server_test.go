@@ -36,6 +36,29 @@ func TestNewServer_BindError(t *testing.T) {
 	}
 }
 
+func TestServer_Close_FreesListenerWithoutStart(t *testing.T) {
+	addr := freeAddr(t)
+	srv, err := NewServer(addr, NewStatus(time.Minute), zerolog.Nop())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Close without ever calling Start must free the bound port.
+	if err := srv.Close(); err != nil {
+		t.Fatalf("Close returned error: %v", err)
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("expected port to be freed after Close, got: %v", err)
+	}
+	_ = ln.Close()
+
+	// Double close is a no-op.
+	if err := srv.Close(); err != nil {
+		t.Errorf("expected double Close to be a no-op, got: %v", err)
+	}
+}
+
 func TestServer_StartAndShutdown(t *testing.T) {
 	status := NewStatus(time.Minute)
 	status.SetDockerConnected(true)

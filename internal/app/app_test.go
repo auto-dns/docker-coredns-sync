@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -68,6 +69,48 @@ func TestNewWithFactories_Success(t *testing.T) {
 	}
 	if app == nil {
 		t.Fatal("expected app to be non-nil")
+	}
+}
+
+func freePort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find a free port: %v", err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
+}
+
+func TestNewWithFactories_DryRunReadiness(t *testing.T) {
+	cfg := testConfig()
+	cfg.App.DryRun = true
+	cfg.HTTP.Enabled = true
+	cfg.HTTP.ListenAddr = freePort(t)
+
+	factories := ClientFactories{
+		DockerClientFactory: func() (*dockerCli.Client, error) { return &dockerCli.Client{}, nil },
+		EtcdClientFactory: func(endpoints []string, dialTimeout time.Duration) (*clientv3.Client, error) {
+			return &clientv3.Client{}, nil
+		},
+	}
+
+	app, err := NewWithFactories(cfg, testLogger(), factories)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Free the bound health port without closing the (empty) real clients.
+	defer app.healthServer.Close()
+
+	if app.status == nil {
+		t.Fatal("expected health status to be wired when HTTP is enabled")
+	}
+	// Even if everything else were healthy, dry-run must never report ready.
+	app.status.SetDockerConnected(true)
+	app.status.RecordReconcile(nil)
+	if ready, reason := app.status.Ready(); ready {
+		t.Errorf("expected dry-run instance to report not-ready, got ready (reason=%q)", reason)
 	}
 }
 
