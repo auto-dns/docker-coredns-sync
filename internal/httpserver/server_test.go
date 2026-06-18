@@ -1,4 +1,4 @@
-package health
+package httpserver
 
 import (
 	"context"
@@ -31,14 +31,14 @@ func TestNewServer_BindError(t *testing.T) {
 	}
 	defer ln.Close()
 
-	if _, err := NewServer(ln.Addr().String(), NewStatus(time.Minute), zerolog.Nop()); err == nil {
+	if _, err := NewServer(ln.Addr().String(), NewStatus(time.Minute), nil, zerolog.Nop()); err == nil {
 		t.Error("expected NewServer to fail binding an in-use address")
 	}
 }
 
 func TestServer_Close_FreesListenerWithoutStart(t *testing.T) {
 	addr := freeAddr(t)
-	srv, err := NewServer(addr, NewStatus(time.Minute), zerolog.Nop())
+	srv, err := NewServer(addr, NewStatus(time.Minute), nil, zerolog.Nop())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestServer_StartAndShutdown(t *testing.T) {
 	status.RecordReconcile(nil)
 
 	addr := freeAddr(t)
-	srv, err := NewServer(addr, status, zerolog.Nop())
+	srv, err := NewServer(addr, status, nil, zerolog.Nop())
 	if err != nil {
 		t.Fatalf("unexpected error creating server: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestServer_StartAndShutdown(t *testing.T) {
 
 func TestHandler_Healthz_AlwaysOK(t *testing.T) {
 	s := NewStatus(time.Minute) // not ready
-	srv := httptest.NewServer(Handler(s))
+	srv := httptest.NewServer(Handler(s, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/healthz")
@@ -123,7 +123,7 @@ func TestHandler_Healthz_AlwaysOK(t *testing.T) {
 
 func TestHandler_Readyz_503WhenNotReady(t *testing.T) {
 	s := NewStatus(time.Minute)
-	srv := httptest.NewServer(Handler(s))
+	srv := httptest.NewServer(Handler(s, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/readyz")
@@ -136,12 +136,48 @@ func TestHandler_Readyz_503WhenNotReady(t *testing.T) {
 	}
 }
 
+func TestHandler_Metrics_ServedWhenProvided(t *testing.T) {
+	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("# metrics"))
+	})
+	srv := httptest.NewServer(Handler(NewStatus(time.Minute), metricsHandler))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 from /metrics, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandler_MetricsOnly_NoHealthRoutes(t *testing.T) {
+	metricsHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	// status nil => only /metrics is registered; /healthz must 404.
+	srv := httptest.NewServer(Handler(nil, metricsHandler))
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 from /healthz when status is nil, got %d", resp.StatusCode)
+	}
+}
+
 func TestHandler_Readyz_200WhenReady(t *testing.T) {
 	s := NewStatus(time.Minute)
 	s.SetDockerConnected(true)
 	s.RecordReconcile(nil)
 
-	srv := httptest.NewServer(Handler(s))
+	srv := httptest.NewServer(Handler(s, nil))
 	defer srv.Close()
 
 	resp, err := http.Get(srv.URL + "/readyz")

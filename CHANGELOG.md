@@ -23,6 +23,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `CONTRIBUTING.md` documenting versioning, branch, tag/release, issue, and
   pull-request conventions; a pull request template; and a workflow that labels
   issues `awaiting-release` when their PR merges into a release branch.
+- etcd authentication and TLS (`etcd.username`, `etcd.password`, and an
+  `etcd.tls` block with `ca_file`, `cert_file`, `key_file`,
+  `insecure_skip_verify`), enabling connections to auth- and/or TLS-protected
+  etcd, including mutual TLS. Misconfiguration (a username without a password, a
+  cert without its key, an unreadable CA) fails fast at startup. (#11)
+- Prometheus metrics endpoint (`metrics.enabled`): exposes `/metrics` on the
+  shared HTTP server with reconcile duration/last-success/result, records
+  added/removed/skipped, etcd op/lock-failure counters, and Docker-disconnect
+  counters. The HTTP server now starts when either `http.enabled` or
+  `metrics.enabled` is set. (#12)
 - Dry-run mode (`app.dry_run` / `--app.dry-run`): the reconciliation loop logs
   the planned add/remove set and makes no changes to etcd. (#10)
 - Health and readiness HTTP endpoints (`http.enabled`, `http.listen_addr`):

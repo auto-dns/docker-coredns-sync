@@ -772,6 +772,85 @@ func TestDockerGenerator_Subscribe_ConnectionObserverReconnectCycle(t *testing.T
 	}
 }
 
+func TestDockerGenerator_Subscribe_DisconnectObserver_CountsGenuineDropOnly(t *testing.T) {
+	var connects int32
+	mock := newMockDockerClient()
+	mock.eventsFunc = func(ctx context.Context, options events.ListOptions) (<-chan events.Message, <-chan error) {
+		n := atomic.AddInt32(&connects, 1)
+		errCh := make(chan error)
+		if n == 1 {
+			eventCh := make(chan events.Message)
+			close(eventCh) // first established stream drops -> genuine disconnect
+			return eventCh, errCh
+		}
+		return make(chan events.Message), errCh // second stays open until shutdown
+	}
+
+	var disconnects int32
+	gen := fastGenerator(mock, WithDisconnectObserver(func() {
+		atomic.AddInt32(&disconnects, 1)
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := gen.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Wait for the reconnect, then cleanly shut down.
+	for i := 0; i < 200; i++ {
+		if atomic.LoadInt32(&connects) >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	for range ch {
+	}
+
+	// Exactly one genuine drop; the clean shutdown after the second connection
+	// must NOT be counted as a disconnect.
+	if got := atomic.LoadInt32(&disconnects); got != 1 {
+		t.Errorf("expected exactly 1 disconnect (genuine drop only, not shutdown), got %d", got)
+	}
+}
+
+func TestDockerGenerator_Subscribe_DisconnectObserver_IgnoresFailedConnect(t *testing.T) {
+	var attempts int32
+	mock := newMockDockerClient()
+	// Never establishes a stream: ContainerList fails every attempt.
+	mock.containerListFunc = func(ctx context.Context, options container.ListOptions) ([]container.Summary, error) {
+		atomic.AddInt32(&attempts, 1)
+		return nil, errors.New("docker unavailable")
+	}
+
+	var disconnects int32
+	gen := fastGenerator(mock, WithDisconnectObserver(func() {
+		atomic.AddInt32(&disconnects, 1)
+	}))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ch, err := gen.Subscribe(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Let a few failed connection attempts happen, then shut down.
+	for i := 0; i < 200; i++ {
+		if atomic.LoadInt32(&attempts) >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	cancel()
+	for range ch {
+	}
+
+	if got := atomic.LoadInt32(&disconnects); got != 0 {
+		t.Errorf("expected 0 disconnects for connections that never established, got %d", got)
+	}
+}
+
 func containsSubsequence(haystack, needle []bool) bool {
 	i := 0
 	for _, v := range haystack {

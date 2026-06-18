@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -57,7 +58,7 @@ func TestNewWithFactories_Success(t *testing.T) {
 		DockerClientFactory: func() (*dockerCli.Client, error) {
 			return &dockerCli.Client{}, nil
 		},
-		EtcdClientFactory: func(endpoints []string, dialTimeout time.Duration) (*clientv3.Client, error) {
+		EtcdClientFactory: func(ecfg *config.EtcdConfig, dialTimeout time.Duration) (*clientv3.Client, error) {
 			return &clientv3.Client{}, nil
 		},
 	}
@@ -91,7 +92,7 @@ func TestNewWithFactories_DryRunReadiness(t *testing.T) {
 
 	factories := ClientFactories{
 		DockerClientFactory: func() (*dockerCli.Client, error) { return &dockerCli.Client{}, nil },
-		EtcdClientFactory: func(endpoints []string, dialTimeout time.Duration) (*clientv3.Client, error) {
+		EtcdClientFactory: func(ecfg *config.EtcdConfig, dialTimeout time.Duration) (*clientv3.Client, error) {
 			return &clientv3.Client{}, nil
 		},
 	}
@@ -101,7 +102,7 @@ func TestNewWithFactories_DryRunReadiness(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	// Free the bound health port without closing the (empty) real clients.
-	defer app.healthServer.Close()
+	defer app.httpServer.Close()
 
 	if app.status == nil {
 		t.Fatal("expected health status to be wired when HTTP is enabled")
@@ -114,6 +115,67 @@ func TestNewWithFactories_DryRunReadiness(t *testing.T) {
 	}
 }
 
+func TestNewWithFactories_MetricsEnabled(t *testing.T) {
+	cfg := testConfig()
+	cfg.Metrics.Enabled = true
+	cfg.HTTP.ListenAddr = freePort(t)
+
+	factories := ClientFactories{
+		DockerClientFactory: func() (*dockerCli.Client, error) { return &dockerCli.Client{}, nil },
+		EtcdClientFactory: func(ecfg *config.EtcdConfig, dialTimeout time.Duration) (*clientv3.Client, error) {
+			return &clientv3.Client{}, nil
+		},
+	}
+
+	app, err := NewWithFactories(cfg, testLogger(), factories)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if app.httpServer == nil {
+		t.Fatal("expected HTTP server to be created when metrics is enabled")
+	}
+	defer app.httpServer.Close()
+	if app.status != nil {
+		t.Error("expected no health status when http.enabled is false")
+	}
+}
+
+func TestNewWithFactories_WarnsPlaintextCredentials(t *testing.T) {
+	cfg := testConfig()
+	cfg.Etcd.Username = "admin"
+	cfg.Etcd.Password = "secret"
+	// Plain http endpoint, no TLS -> credentials would go in plaintext.
+	cfg.Etcd.Endpoints = []string{"http://localhost:2379"}
+
+	var buf bytes.Buffer
+	logger := zerolog.New(&buf)
+
+	factories := ClientFactories{
+		DockerClientFactory: func() (*dockerCli.Client, error) { return &dockerCli.Client{}, nil },
+		EtcdClientFactory: func(ecfg *config.EtcdConfig, dialTimeout time.Duration) (*clientv3.Client, error) {
+			return &clientv3.Client{}, nil
+		},
+	}
+
+	if _, err := NewWithFactories(cfg, logger, factories); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(buf.String(), "plaintext") {
+		t.Errorf("expected a plaintext-credentials warning, got logs: %s", buf.String())
+	}
+}
+
+func TestDefaultFactories_EtcdTLSError(t *testing.T) {
+	f := DefaultFactories()
+	cfg := &config.EtcdConfig{
+		Endpoints: []string{"https://localhost:2379"},
+		TLS:       config.EtcdTLSConfig{CAFile: "/nonexistent/ca.pem"},
+	}
+	if _, err := f.EtcdClientFactory(cfg, time.Second); err == nil {
+		t.Error("expected error from etcd factory with an unreadable TLS CA file")
+	}
+}
+
 func TestNewWithFactories_DockerClientError(t *testing.T) {
 	cfg := testConfig()
 	logger := testLogger()
@@ -122,7 +184,7 @@ func TestNewWithFactories_DockerClientError(t *testing.T) {
 		DockerClientFactory: func() (*dockerCli.Client, error) {
 			return nil, errors.New("docker connection failed")
 		},
-		EtcdClientFactory: func(endpoints []string, dialTimeout time.Duration) (*clientv3.Client, error) {
+		EtcdClientFactory: func(ecfg *config.EtcdConfig, dialTimeout time.Duration) (*clientv3.Client, error) {
 			return &clientv3.Client{}, nil
 		},
 	}
@@ -148,7 +210,7 @@ func TestNewWithFactories_EtcdClientError(t *testing.T) {
 		DockerClientFactory: func() (*dockerCli.Client, error) {
 			return &dockerCli.Client{}, nil
 		},
-		EtcdClientFactory: func(endpoints []string, dialTimeout time.Duration) (*clientv3.Client, error) {
+		EtcdClientFactory: func(ecfg *config.EtcdConfig, dialTimeout time.Duration) (*clientv3.Client, error) {
 			return nil, errors.New("etcd connection failed")
 		},
 	}

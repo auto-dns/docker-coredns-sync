@@ -31,3 +31,10 @@ type upstreamRegistry interface {
 type reconcileReporter interface {
 	RecordReconcile(err error)
 }
+
+// reconcileMetrics is an optional sink for quantitative reconciliation metrics.
+// added/removed are the records actually applied this pass (zero in dry-run),
+// skipped is the number of desired records dropped during conflict filtering.
+type reconcileMetrics interface {
+	ObserveReconcile(duration time.Duration, added, removed, skipped int, err error)
+}

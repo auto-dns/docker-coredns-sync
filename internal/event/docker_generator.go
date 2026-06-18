@@ -26,6 +26,7 @@ type DockerGenerator struct {
 	logger             zerolog.Logger
 	cli                dockerClient
 	onConnectionChange func(connected bool)
+	onDisconnect       func()
 	bufferSize         int
 	reconnectInitial   time.Duration
 	reconnectMax       time.Duration
@@ -68,6 +69,18 @@ func WithConnectionObserver(fn func(connected bool)) Option {
 	}
 }
 
+// WithDisconnectObserver registers a callback invoked once for each genuine
+// loss of an established event stream, i.e. a drop that triggers a reconnect.
+// Unlike the connection observer it does NOT fire on a clean shutdown
+// (ctx cancellation) or on a failed initial connection, so it is suitable for
+// counting real disconnects. The callback must be non-blocking: it runs inline
+// on the generator's goroutine.
+func WithDisconnectObserver(fn func()) Option {
+	return func(dw *DockerGenerator) {
+		dw.onDisconnect = fn
+	}
+}
+
 func NewDockerGenerator(cli dockerClient, logger zerolog.Logger, opts ...Option) *DockerGenerator {
 	dw := &DockerGenerator{
 		logger:           logger,
@@ -85,6 +98,12 @@ func NewDockerGenerator(cli dockerClient, logger zerolog.Logger, opts ...Option)
 func (dw *DockerGenerator) setConnected(connected bool) {
 	if dw.onConnectionChange != nil {
 		dw.onConnectionChange(connected)
+	}
+}
+
+func (dw *DockerGenerator) notifyDisconnect() {
+	if dw.onDisconnect != nil {
+		dw.onDisconnect()
 	}
 }
 
@@ -117,6 +136,12 @@ func (dw *DockerGenerator) Subscribe(ctx context.Context) (<-chan domain.Contain
 			}
 
 			dw.setConnected(false)
+			// Count this as a disconnect only if a stream was actually
+			// established (connectedAt set); a failed initial connect is not a
+			// disconnect, and a clean shutdown returned above before reaching here.
+			if !connectedAt.IsZero() {
+				dw.notifyDisconnect()
+			}
 			if err != nil {
 				dw.logger.Error().Err(err).Dur("backoff", backoff).Msg("Docker event stream failed; reconnecting after backoff")
 			} else {

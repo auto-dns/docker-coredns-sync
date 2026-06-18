@@ -18,6 +18,7 @@ type SyncEngine struct {
 	state    state
 	reg      upstreamRegistry
 	reporter reconcileReporter
+	metrics  reconcileMetrics
 }
 
 func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, reg upstreamRegistry, state state) *SyncEngine {
@@ -34,6 +35,12 @@ func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, 
 // outcome of each reconciliation pass. Safe to leave unset.
 func (se *SyncEngine) SetReconcileReporter(r reconcileReporter) {
 	se.reporter = r
+}
+
+// SetMetrics registers an optional sink for quantitative reconciliation
+// metrics. Safe to leave unset.
+func (se *SyncEngine) SetMetrics(m reconcileMetrics) {
+	se.metrics = m
 }
 
 func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
@@ -98,6 +105,8 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 		select {
 		case <-ticker.C:
 			se.logger.Debug().Msg("Reconciliation loop tick")
+			start := time.Now()
+			var added, removed, skipped int
 			err := se.reg.LockTransaction(ctx, []string{"__global__"}, func() error {
 				actual, err := se.reg.List(ctx)
 				if err != nil {
@@ -106,6 +115,7 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 				desired := se.state.GetAllDesiredRecordIntents()
 				// Filter out any internally inconsistent intents:
 				desiredReconciled := FilterRecordIntents(desired, se.logger)
+				skipped = len(desired) - len(desiredReconciled)
 				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, se.logger)
 				if se.cfg.DryRun {
 					for _, rec := range toRemove {
@@ -121,12 +131,16 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 					if err := se.reg.Remove(ctx, rec); err != nil {
 						writeErrs++
 						se.logger.Error().Err(err).Msg("Error removing record")
+					} else {
+						removed++
 					}
 				}
 				for _, rec := range toAdd {
 					if err := se.reg.Register(ctx, rec); err != nil {
 						writeErrs++
 						se.logger.Error().Err(err).Msg("Error registering record")
+					} else {
+						added++
 					}
 				}
 				if writeErrs > 0 {
@@ -138,6 +152,9 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 			})
 			if se.reporter != nil {
 				se.reporter.RecordReconcile(err)
+			}
+			if se.metrics != nil {
+				se.metrics.ObserveReconcile(time.Since(start), added, removed, skipped, err)
 			}
 			if err != nil {
 				se.logger.Error().Err(err).Msg("Sync error")

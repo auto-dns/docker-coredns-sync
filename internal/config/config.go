@@ -1,6 +1,8 @@
 package config
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"os"
@@ -16,6 +18,7 @@ type Config struct {
 	Etcd    EtcdConfig    `mapstructure:"etcd"`
 	Logging LoggingConfig `mapstructure:"log"`
 	HTTP    HTTPConfig    `mapstructure:"http"`
+	Metrics MetricsConfig `mapstructure:"metrics"`
 	Docker  DockerConfig  `mapstructure:"docker"`
 }
 
@@ -27,11 +30,18 @@ type DockerConfig struct {
 	ReconnectMaxBackoff     float64 `mapstructure:"reconnect_max_backoff"`     // seconds
 }
 
-// HTTPConfig configures the auxiliary HTTP server that serves health/readiness
-// (and, in future, metrics) endpoints.
+// HTTPConfig configures the auxiliary HTTP server that serves the
+// health/readiness and metrics endpoints.
 type HTTPConfig struct {
 	Enabled    bool   `mapstructure:"enabled"`
 	ListenAddr string `mapstructure:"listen_addr"`
+}
+
+// MetricsConfig gates the Prometheus /metrics endpoint, which is served on the
+// shared HTTP server (see HTTPConfig). When enabled, the HTTP server starts
+// even if http.enabled is false.
+type MetricsConfig struct {
+	Enabled bool `mapstructure:"enabled"`
 }
 
 // AppConfig holds application-specific configuration.
@@ -48,16 +58,97 @@ type AppConfig struct {
 
 // EtcdConfig holds etcd-related configuration.
 type EtcdConfig struct {
-	Endpoints         []string `mapstructure:"endpoints"`
-	PathPrefix        string   `mapstructure:"path_prefix"`
-	LockTTL           float64  `mapstructure:"lock_ttl"`
-	LockTimeout       float64  `mapstructure:"lock_timeout"`
-	LockRetryInterval float64  `mapstructure:"lock_retry_interval"`
+	Endpoints         []string      `mapstructure:"endpoints"`
+	PathPrefix        string        `mapstructure:"path_prefix"`
+	Username          string        `mapstructure:"username"`
+	Password          string        `mapstructure:"password"`
+	TLS               EtcdTLSConfig `mapstructure:"tls"`
+	LockTTL           float64       `mapstructure:"lock_ttl"`
+	LockTimeout       float64       `mapstructure:"lock_timeout"`
+	LockRetryInterval float64       `mapstructure:"lock_retry_interval"`
+}
+
+// EtcdTLSConfig configures TLS for the etcd client connection. It is required
+// for any non-loopback etcd deployment served over https://.
+type EtcdTLSConfig struct {
+	CAFile             string `mapstructure:"ca_file"`
+	CertFile           string `mapstructure:"cert_file"`
+	KeyFile            string `mapstructure:"key_file"`
+	InsecureSkipVerify bool   `mapstructure:"insecure_skip_verify"`
+}
+
+// Configured reports whether any TLS setting is present, i.e. whether the etcd
+// client should be built with a TLS configuration.
+func (t EtcdTLSConfig) Configured() bool {
+	return t.CAFile != "" || t.CertFile != "" || t.KeyFile != "" || t.InsecureSkipVerify
+}
+
+// hasHTTPSEndpoint reports whether any configured endpoint uses the https
+// scheme.
+func (c *EtcdConfig) hasHTTPSEndpoint() bool {
+	for _, e := range c.Endpoints {
+		if strings.HasPrefix(e, "https://") {
+			return true
+		}
+	}
+	return false
+}
+
+// UsesTLS reports whether the etcd connection will be encrypted: either TLS is
+// explicitly configured, or at least one endpoint is https://.
+func (c *EtcdConfig) UsesTLS() bool {
+	return c.TLS.Configured() || c.hasHTTPSEndpoint()
+}
+
+// ClientTLS builds a *tls.Config for the etcd connection. When no TLS settings
+// are present it returns (nil, nil) for plain http:// endpoints, but for an
+// https:// endpoint it returns a config that verifies the server against the
+// system root CAs — otherwise the client would silently dial without TLS and
+// fail with an opaque transport error. A client cert/key pair and a CA root are
+// loaded only when their respective files are set.
+func (c *EtcdConfig) ClientTLS() (*tls.Config, error) {
+	t := c.TLS
+	if !t.Configured() {
+		if c.hasHTTPSEndpoint() {
+			return &tls.Config{MinVersion: tls.VersionTLS12}, nil
+		}
+		return nil, nil
+	}
+	cfg := &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: t.InsecureSkipVerify, //nolint:gosec // opt-in via config for self-signed setups
+	}
+	if t.CertFile != "" || t.KeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(t.CertFile, t.KeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("load etcd client keypair: %w", err)
+		}
+		cfg.Certificates = []tls.Certificate{cert}
+	}
+	if t.CAFile != "" {
+		pem, err := os.ReadFile(t.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read etcd CA file: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("no certificates found in etcd CA file %q", t.CAFile)
+		}
+		cfg.RootCAs = pool
+	}
+	return cfg, nil
 }
 
 // LoggingConfig holds the logging-related configuration.
 type LoggingConfig struct {
 	Level string `mapstructure:"level"`
+}
+
+// HTTPServerEnabled reports whether the auxiliary HTTP server should run, i.e.
+// the health endpoints or the metrics endpoint (or both) are enabled. It is the
+// single source of truth for this decision, used by both validation and startup.
+func (c *Config) HTTPServerEnabled() bool {
+	return c.HTTP.Enabled || c.Metrics.Enabled
 }
 
 // Load initializes, loads, and validates the config in one public call.
@@ -114,8 +205,15 @@ func initConfig() error {
 	viper.SetDefault("etcd.lock_timeout", 2.0)
 	viper.SetDefault("etcd.lock_retry_interval", 0.1)
 	viper.SetDefault("log.level", "INFO")
+	viper.SetDefault("etcd.username", "")
+	viper.SetDefault("etcd.password", "")
+	viper.SetDefault("etcd.tls.ca_file", "")
+	viper.SetDefault("etcd.tls.cert_file", "")
+	viper.SetDefault("etcd.tls.key_file", "")
+	viper.SetDefault("etcd.tls.insecure_skip_verify", false)
 	viper.SetDefault("http.enabled", false)
 	viper.SetDefault("http.listen_addr", ":8080")
+	viper.SetDefault("metrics.enabled", false)
 	viper.SetDefault("docker.event_buffer_size", 100)
 	viper.SetDefault("docker.reconnect_initial_backoff", 1.0)
 	viper.SetDefault("docker.reconnect_max_backoff", 30.0)
@@ -158,6 +256,15 @@ func (c *Config) validate() error {
 	if c.Etcd.PathPrefix == "" {
 		return fmt.Errorf("etcd.path_prefix cannot be empty")
 	}
+	if (c.Etcd.TLS.CertFile == "") != (c.Etcd.TLS.KeyFile == "") {
+		return fmt.Errorf("etcd.tls.cert_file and etcd.tls.key_file must be provided together")
+	}
+	if c.Etcd.TLS.InsecureSkipVerify && c.Etcd.TLS.CAFile != "" {
+		return fmt.Errorf("etcd.tls.insecure_skip_verify cannot be combined with etcd.tls.ca_file: the CA would be ignored, giving a false sense of verification")
+	}
+	if c.Etcd.Username != "" && c.Etcd.Password == "" {
+		return fmt.Errorf("etcd.password must be set when etcd.username is provided")
+	}
 	if c.Etcd.LockTTL <= 0 {
 		return fmt.Errorf("etcd.lock_ttl must be > 0")
 	}
@@ -173,8 +280,8 @@ func (c *Config) validate() error {
 	if _, ok := validLevels[strings.ToUpper(c.Logging.Level)]; !ok {
 		return fmt.Errorf("log.level must be a valid log level, got: %s", c.Logging.Level)
 	}
-	if c.HTTP.Enabled && strings.TrimSpace(c.HTTP.ListenAddr) == "" {
-		return fmt.Errorf("http.listen_addr cannot be empty when http.enabled is true")
+	if c.HTTPServerEnabled() && strings.TrimSpace(c.HTTP.ListenAddr) == "" {
+		return fmt.Errorf("http.listen_addr cannot be empty when http.enabled or metrics.enabled is true")
 	}
 	if c.Docker.EventBufferSize <= 0 {
 		return fmt.Errorf("docker.event_buffer_size must be greater than 0")
