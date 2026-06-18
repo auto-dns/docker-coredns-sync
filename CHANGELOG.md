@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Versioning note.** This project migrated from its original repository to the
+> `auto-dns` organization. Its canonical version line continues from the highest
+> pre-migration release, **v0.6.0** — **v0.6.1** is the first release cut on the
+> post-migration `main` history, and development continues on the **0.6.x** line.
+>
+> Two earlier numbering artifacts are kept below for historical accuracy but are
+> **not** the active line:
+> - **v0.1.0 / v0.1.3 / v0.1.4** — a short-lived restart of versioning just after
+>   the migration, since abandoned in favor of continuing from v0.6.0.
+> - **v0.2.0 – v0.6.0** — release history inherited from the original repository.
+>   These tags point at pre-migration commits that are **not reachable from the
+>   current `main`**.
+
 ## [Unreleased]
 
 ## [0.6.1] - 2026-06-17
@@ -35,8 +48,9 @@ runtime behavior is unchanged from the previous release.
 
 ---
 
-> **Note:** Versions v0.2.0 through v0.6.0 below are the release history from the original
-> `the original repository` repository, preserved here after migration to the `auto-dns` org.
+> The releases below (**v0.2.0 – v0.6.0**) predate the migration to the `auto-dns`
+> org and are preserved for historical reference. See the versioning note at the
+> top of this file.
 
 ---
 
