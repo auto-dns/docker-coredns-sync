@@ -85,6 +85,63 @@ func TestGetContainerRecordIntents_AWithValue(t *testing.T) {
 	}
 }
 
+func TestGetContainerRecordIntents_TTLDefaultFromConfig(t *testing.T) {
+	cfg := makeTestConfig()
+	cfg.RecordTTL = 120
+	event := makeContainerEvent(map[string]string{
+		"coredns.enabled": "true",
+		"coredns.A.name":  "app.example.com",
+		"coredns.A.value": "192.168.1.1",
+	})
+
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
+
+	if len(intents) != 1 {
+		t.Fatalf("expected 1 intent, got %d", len(intents))
+	}
+	if intents[0].TTL != 120 {
+		t.Errorf("expected TTL 120 from config default, got %d", intents[0].TTL)
+	}
+}
+
+func TestGetContainerRecordIntents_TTLLabelOverridesConfig(t *testing.T) {
+	cfg := makeTestConfig()
+	cfg.RecordTTL = 120
+	event := makeContainerEvent(map[string]string{
+		"coredns.enabled": "true",
+		"coredns.A.name":  "app.example.com",
+		"coredns.A.value": "192.168.1.1",
+		"coredns.A.ttl":   "30",
+	})
+
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
+
+	if len(intents) != 1 {
+		t.Fatalf("expected 1 intent, got %d", len(intents))
+	}
+	if intents[0].TTL != 30 {
+		t.Errorf("expected per-record TTL 30 to override config default, got %d", intents[0].TTL)
+	}
+}
+
+func TestGetContainerRecordIntents_TTLUnsetIsZero(t *testing.T) {
+	cfg := makeTestConfig() // RecordTTL defaults to 0
+	event := makeContainerEvent(map[string]string{
+		"coredns.enabled": "true",
+		"coredns.A.name":  "app.example.com",
+		"coredns.A.value": "192.168.1.1",
+	})
+
+	intents := GetContainerRecordIntents(event, cfg, nopLogger())
+
+	if len(intents) != 1 {
+		t.Fatalf("expected 1 intent, got %d", len(intents))
+	}
+	if intents[0].TTL != 0 {
+		t.Errorf("expected TTL 0 when neither config nor label set it, got %d", intents[0].TTL)
+	}
+}
+
 func TestGetContainerRecordIntents_AWithDefaultIPv4(t *testing.T) {
 	cfg := makeTestConfig()
 	event := makeContainerEvent(map[string]string{

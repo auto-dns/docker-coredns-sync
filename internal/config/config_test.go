@@ -544,6 +544,12 @@ func TestLoad_Success_NoConfigFile_UsesDefaults(t *testing.T) {
 	if cfg.App.PollInterval != 5 {
 		t.Errorf("expected default poll interval 5, got %d", cfg.App.PollInterval)
 	}
+	if cfg.App.RecordTTL != 0 {
+		t.Errorf("expected default record_ttl 0, got %d", cfg.App.RecordTTL)
+	}
+	if cfg.App.HeartbeatTTL != 30 {
+		t.Errorf("expected default heartbeat_ttl 30, got %d", cfg.App.HeartbeatTTL)
+	}
 }
 
 func TestLoad_InitConfigError_InvalidYAML(t *testing.T) {

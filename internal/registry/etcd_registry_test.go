@@ -54,7 +54,7 @@ func TestNewEtcdRegistry(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
 
-	reg := NewEtcdRegistry(mock, cfg, "test-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "test-host", 0, testLogger())
 
 	if reg == nil {
 		t.Fatal("expected non-nil registry")
@@ -70,7 +70,7 @@ func TestNewEtcdRegistry(t *testing.T) {
 func TestEtcdRegistry_Register_CreatesKey(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 	intent := makeIntent("app.example.com", "192.168.1.1", domain.RecordA)
@@ -101,7 +101,7 @@ func TestEtcdRegistry_Register_CreatesKey(t *testing.T) {
 func TestEtcdRegistry_Register_ValueContainsRecordData(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 	intent := makeIntent("app.example.com", "192.168.1.1", domain.RecordA)
@@ -135,7 +135,7 @@ func TestEtcdRegistry_Register_ValueContainsRecordData(t *testing.T) {
 func TestEtcdRegistry_Register_IncrementsIndex(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Simulate existing keys x1 and x2
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -170,7 +170,7 @@ func TestEtcdRegistry_Register_GetError(t *testing.T) {
 	}
 
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 	intent := makeIntent("app.example.com", "192.168.1.1", domain.RecordA)
@@ -192,7 +192,7 @@ func TestEtcdRegistry_Register_PutError(t *testing.T) {
 	}
 
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 	intent := makeIntent("app.example.com", "192.168.1.1", domain.RecordA)
@@ -210,7 +210,7 @@ func TestEtcdRegistry_Register_PutError(t *testing.T) {
 func TestEtcdRegistry_Remove_DeletesMatchingKey(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Simulate existing key with matching record
 	existingValue, _ := json.Marshal(etcdRecord{
@@ -249,7 +249,7 @@ func TestEtcdRegistry_Remove_DeletesMatchingKey(t *testing.T) {
 func TestEtcdRegistry_Remove_NoMatchingKeys(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// No matching records
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -274,7 +274,7 @@ func TestEtcdRegistry_Remove_NoMatchingKeys(t *testing.T) {
 func TestEtcdRegistry_Remove_DoesNotDeleteNonMatching(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Existing key with different host
 	existingValue, _ := json.Marshal(etcdRecord{
@@ -314,7 +314,7 @@ func TestEtcdRegistry_Remove_DoesNotDeleteNonMatching(t *testing.T) {
 func TestEtcdRegistry_List_ReturnsAllRecords(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Create test records
 	record1, _ := json.Marshal(etcdRecord{
@@ -358,7 +358,7 @@ func TestEtcdRegistry_List_ReturnsAllRecords(t *testing.T) {
 func TestEtcdRegistry_List_HandlesInvalidJSON(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	validRecord, _ := json.Marshal(etcdRecord{
 		Host:               "192.168.1.1",
@@ -398,7 +398,7 @@ func TestEtcdRegistry_List_Error(t *testing.T) {
 	}
 
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 	_, err := reg.List(ctx)
@@ -411,7 +411,7 @@ func TestEtcdRegistry_List_Error(t *testing.T) {
 func TestEtcdRegistry_List_Empty(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 	intents, err := reg.List(ctx)
@@ -428,7 +428,7 @@ func TestEtcdRegistry_List_Empty(t *testing.T) {
 func TestEtcdRegistry_Close(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	err := reg.Close()
 
@@ -448,7 +448,7 @@ func TestEtcdRegistry_Close_Error(t *testing.T) {
 	}
 
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	err := reg.Close()
 
@@ -460,7 +460,7 @@ func TestEtcdRegistry_Close_Error(t *testing.T) {
 func TestEtcdRegistry_LockTransaction_Success(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	executed := false
 	ctx := context.Background()
@@ -489,7 +489,7 @@ func TestEtcdRegistry_LockTransaction_Success(t *testing.T) {
 func TestEtcdRegistry_LockTransaction_FunctionError(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 
@@ -516,7 +516,7 @@ func TestEtcdRegistry_LockTransaction_FunctionError(t *testing.T) {
 func TestEtcdRegistry_LockTransaction_DeduplicatesKeys(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	grantCount := 0
 	mock.grantFunc = func(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error) {
@@ -543,7 +543,7 @@ func TestEtcdRegistry_LockTransaction_DeduplicatesKeys(t *testing.T) {
 func TestEtcdRegistry_LockTransaction_ContextCancellation(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -577,7 +577,7 @@ func TestEtcdRegistry_Register_DifferentRecordTypes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			mock := newMockEtcdClient()
 			cfg := testConfig()
-			reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+			reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 			ctx := context.Background()
 			intent := makeIntent("app.example.com", tt.value, tt.kind)
@@ -603,7 +603,7 @@ func TestEtcdRegistry_Register_DifferentRecordTypes(t *testing.T) {
 
 func TestEtcdRegistry_recordMatches(t *testing.T) {
 	cfg := testConfig()
-	reg := NewEtcdRegistry(nil, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(nil, cfg, "docker-host", 0, testLogger())
 
 	intent := makeIntent("app.example.com", "192.168.1.1", domain.RecordA)
 
@@ -692,7 +692,7 @@ func TestEtcdRegistry_recordMatches(t *testing.T) {
 
 func TestEtcdRegistry_recordMatches_EmptyContainerId(t *testing.T) {
 	cfg := testConfig()
-	reg := NewEtcdRegistry(nil, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(nil, cfg, "docker-host", 0, testLogger())
 
 	rec, _ := domain.NewA("app.example.com", "192.168.1.1")
 	intent := &domain.RecordIntent{
@@ -730,7 +730,7 @@ func TestEtcdRegistry_Remove_GetError(t *testing.T) {
 	}
 
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 	intent := makeIntent("app.example.com", "192.168.1.1", domain.RecordA)
@@ -745,7 +745,7 @@ func TestEtcdRegistry_Remove_GetError(t *testing.T) {
 func TestEtcdRegistry_Remove_MultipleMatches(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Multiple matching records
 	existingValue, _ := json.Marshal(etcdRecord{
@@ -783,7 +783,7 @@ func TestEtcdRegistry_Remove_MultipleMatches(t *testing.T) {
 func TestEtcdRegistry_Remove_SkipsInvalidJSON(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	validValue, _ := json.Marshal(etcdRecord{
 		Host:               "192.168.1.1",
@@ -820,7 +820,7 @@ func TestEtcdRegistry_Remove_SkipsInvalidJSON(t *testing.T) {
 func TestEtcdRegistry_Remove_SkipsNonChildKeys(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	existingValue, _ := json.Marshal(etcdRecord{
 		Host:               "192.168.1.1",
@@ -866,7 +866,7 @@ func TestEtcdRegistry_LockTransaction_GrantError(t *testing.T) {
 	}
 
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 
@@ -894,7 +894,7 @@ func TestEtcdRegistry_LockTransaction_TxnError(t *testing.T) {
 	}
 
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 
@@ -914,7 +914,7 @@ func TestEtcdRegistry_LockTransaction_KeepAliveError(t *testing.T) {
 	}
 
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	ctx := context.Background()
 
@@ -933,7 +933,7 @@ func TestEtcdRegistry_LockTransaction_KeepAliveError(t *testing.T) {
 func TestEtcdRegistry_LockTransaction_EmptyKeys(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	executed := false
 	ctx := context.Background()
@@ -960,7 +960,7 @@ func TestEtcdRegistry_LockTransaction_EmptyKeys(t *testing.T) {
 func TestEtcdRegistry_LockTransaction_MultipleKeys(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	grantCount := 0
 	mock.grantFunc = func(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error) {
@@ -991,7 +991,7 @@ func TestEtcdRegistry_LockTransaction_MultipleKeys(t *testing.T) {
 func TestEtcdRegistry_getNextIndexedKey_GapFilling(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Simulate existing keys with gaps: x1, x3, x5
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -1021,7 +1021,7 @@ func TestEtcdRegistry_getNextIndexedKey_GapFilling(t *testing.T) {
 func TestEtcdRegistry_getNextIndexedKey_NonNumericSuffix(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Keys with non-numeric suffixes should be ignored
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -1054,7 +1054,7 @@ func TestEtcdRegistry_getNextIndexedKey_NonNumericSuffix(t *testing.T) {
 func TestEtcdRegistry_Remove_BatchDeleteError(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	intent := makeIntent("app.example.com", "192.168.1.1", domain.RecordA)
 	value, _ := json.Marshal(etcdRecord{
@@ -1102,7 +1102,7 @@ func TestEtcdRegistry_LockTransaction_ContextCancelDuringRetry(t *testing.T) {
 		LockTimeout:       5.0, // Long timeout
 		LockRetryInterval: 0.01,
 	}
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Make Txn always fail to acquire (Succeeded = false)
 	mock.txnFunc = func(ctx context.Context) clientv3.Txn {
@@ -1142,7 +1142,7 @@ func TestEtcdRegistry_LockTransaction_AcquireTimeout(t *testing.T) {
 		LockTimeout:       0.05, // Very short timeout
 		LockRetryInterval: 0.01,
 	}
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Make Txn always fail to acquire (Succeeded = false)
 	mock.txnFunc = func(ctx context.Context) clientv3.Txn {
@@ -1176,7 +1176,7 @@ func TestEtcdRegistry_LockTransaction_RevokeTimeoutError(t *testing.T) {
 		LockTimeout:       0.05,
 		LockRetryInterval: 0.01,
 	}
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Make Txn fail to acquire but revoke also fails
 	mock.txnFunc = func(ctx context.Context) clientv3.Txn {
@@ -1208,7 +1208,7 @@ func TestEtcdRegistry_LockTransaction_RevokeTimeoutError(t *testing.T) {
 func TestEtcdRegistry_LockTransaction_DeleteAndRevokeErrorsDuringRelease(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	executed := false
 
@@ -1252,7 +1252,7 @@ func TestEtcdRegistry_LockTransaction_DeleteAndRevokeErrorsDuringRelease(t *test
 func TestEtcdRegistry_getNextIndexedKey_ConsecutiveIndices(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Simulate existing keys: x1, x2, x3 (consecutive)
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -1282,7 +1282,7 @@ func TestEtcdRegistry_getNextIndexedKey_ConsecutiveIndices(t *testing.T) {
 func TestEtcdRegistry_getNextIndexedKey_KeyWithoutSlash(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Keys that don't have the base+/ prefix should be skipped
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -1313,7 +1313,7 @@ func TestEtcdRegistry_getNextIndexedKey_KeyWithoutSlash(t *testing.T) {
 func TestEtcdRegistry_Remove_ContainerIdEmpty(t *testing.T) {
 	mock := newMockEtcdClient()
 	cfg := testConfig()
-	reg := NewEtcdRegistry(mock, cfg, "docker-host", testLogger())
+	reg := NewEtcdRegistry(mock, cfg, "docker-host", 0, testLogger())
 
 	// Create intent with empty container ID (wildcard match)
 	intent := &domain.RecordIntent{

@@ -172,7 +172,15 @@ func FilterRecordIntents(recordIntents []*domain.RecordIntent, logger zerolog.Lo
 	return desiredByNameKindDeduplicated.GetAllValues()
 }
 
-func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.AppConfig, logger zerolog.Logger) ([]*domain.RecordIntent, []*domain.RecordIntent) {
+// ReconcileAndValidate compares the desired record set against what is actually
+// in etcd and returns the records to add and to remove.
+//
+// liveHostnames is the set of hosts known to be alive (via their heartbeat
+// keys). When it is non-nil, records owned by a host that is NOT in the set
+// (and not owned by this host) are garbage-collected as orphans. When it is
+// nil, cross-host GC is disabled and only this host's own stale records are
+// removed — the original, conservative behavior.
+func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.AppConfig, liveHostnames map[string]struct{}, logger zerolog.Logger) ([]*domain.RecordIntent, []*domain.RecordIntent) {
 	toAddMap := map[string]*domain.RecordIntent{}
 	toRemoveMap := map[string]*domain.RecordIntent{}
 
@@ -189,6 +197,13 @@ func ReconcileAndValidate(desired, actual []*domain.RecordIntent, cfg *config.Ap
 				logger.Info().Msgf("Removing stale record: %s (owned by %s/%s)", ri.Record.Render(), ri.Hostname, ri.ContainerName)
 				toRemoveMap[ri.Key()] = ri
 				continue // Don't add stale records to lookup - they're already being removed
+			} else if liveHostnames != nil {
+				if _, alive := liveHostnames[ri.Hostname]; !alive {
+					logger.Info().Msgf("GC: removing orphaned record owned by dead host: %s (owned by %s/%s)", ri.Record.Render(), ri.Hostname, ri.ContainerName)
+					toRemoveMap[ri.Key()] = ri
+					continue // Don't add orphaned records to lookup - they're already being removed
+				}
+				logger.Debug().Msgf("Skipping removal of record %s owned by live host %s (not this host %s)", ri.Record.Render(), ri.Hostname, cfg.Hostname)
 			} else {
 				logger.Debug().Msgf("Skipping removal of record %s not owned by this host (%s != %s)", ri.Record.Render(), ri.Hostname, cfg.Hostname)
 			}

@@ -73,6 +73,21 @@ func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
 func (se *SyncEngine) Run(ctx context.Context) error {
 	se.logger.Info().Msg("Starting SyncEngine")
 
+	// Surface configuration that will silently drop records, prominently, once
+	// at startup rather than only as per-record warnings buried in the logs.
+	if se.cfg.HostIPv4 == "" {
+		se.logger.Warn().Msg("app.host_ipv4 is not set: value-less A records (coredns.A.<name> with no .value) will be SKIPPED")
+	}
+	if se.cfg.HostIPv6 == "" {
+		se.logger.Warn().Msg("app.host_ipv6 is not set: value-less AAAA records (coredns.AAAA.<name> with no .value) will be SKIPPED")
+	}
+
+	// Publish this host's liveness key so other hosts won't GC our records, and
+	// so we participate in cross-host GC of records owned by dead hosts.
+	if err := se.reg.StartHeartbeat(ctx); err != nil {
+		se.logger.Error().Err(err).Msg("failed to start heartbeat; cross-host GC will be disabled this run")
+	}
+
 	// Step 1: Subscribe to Docker events
 	eventCh, err := se.gen.Subscribe(ctx)
 	if err != nil {
@@ -112,11 +127,18 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 				if err != nil {
 					return fmt.Errorf("error listing registry records: %w", err)
 				}
+				// Live host set drives cross-host GC. On error, fall back to nil
+				// (GC disabled this tick) rather than risk deleting live records.
+				liveHosts, err := se.reg.GetLiveHostnames(ctx)
+				if err != nil {
+					se.logger.Warn().Err(err).Msg("could not fetch live hostnames; skipping cross-host GC this tick")
+					liveHosts = nil
+				}
 				desired := se.state.GetAllDesiredRecordIntents()
 				// Filter out any internally inconsistent intents:
 				desiredReconciled := FilterRecordIntents(desired, se.logger)
 				skipped = len(desired) - len(desiredReconciled)
-				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, se.logger)
+				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, liveHosts, se.logger)
 				if se.cfg.DryRun {
 					for _, rec := range toRemove {
 						se.logger.Info().Str("record", rec.Render()).Msg("[dry-run] would remove record")

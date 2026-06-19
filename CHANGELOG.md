@@ -41,6 +41,20 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Configurable Docker event buffer and reconnect backoff
   (`docker.event_buffer_size`, `docker.reconnect_initial_backoff`,
   `docker.reconnect_max_backoff`). (#8)
+- **Per-record TTL control.** Records can now carry a TTL: set a global default
+  with `app.record_ttl` (seconds) or override per record with a
+  `coredns.<kind>[.<alias>].ttl` label. `0` leaves the TTL unset so CoreDNS
+  applies its own default. A TTL change is treated as record drift, so it
+  self-heals on the next reconcile. (#14)
+- **Cross-host garbage collection of orphaned records.** Each host publishes a
+  lease-backed heartbeat key (outside `etcd.path_prefix`) and keeps it alive.
+  Reconciliation now removes records owned by a host that has no live heartbeat,
+  cleaning up after permanently-decommissioned nodes. The lease TTL
+  (`app.heartbeat_ttl`, default `30s`) acts as the grace period so transient
+  outages don't trigger premature deletion. Set it to `0` to disable heartbeats
+  and cross-host GC (preserving the prior, owner-only removal behavior). (#13)
+- **Prominent startup warning** when `app.host_ipv4`/`app.host_ipv6` is unset,
+  making it obvious that value-less A/AAAA records will be skipped. (#16)
 
 ### Changed
 - The Docker event stream now reconnects automatically with bounded
@@ -57,6 +71,11 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Resync pruning of containers missing after a reconnect is debounced (a
   container must be absent for two consecutive resyncs) so a container that is
   only transiently missing from a single snapshot is not removed. (#8)
+
+### Notes
+- When upgrading a multi-host fleet, roll out to all hosts together: a host
+  running an older version won't publish a heartbeat and could be treated as
+  dead by upgraded hosts.
 
 ## [0.6.1] - 2026-06-17
 
