@@ -46,13 +46,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `coredns.<kind>[.<alias>].ttl` label. `0` leaves the TTL unset so CoreDNS
   applies its own default. A TTL change is treated as record drift, so it
   self-heals on the next reconcile. (#14)
-- **Cross-host garbage collection of orphaned records.** Each host publishes a
-  lease-backed heartbeat key (outside `etcd.path_prefix`) and keeps it alive.
-  Reconciliation now removes records owned by a host that has no live heartbeat,
-  cleaning up after permanently-decommissioned nodes. The lease TTL
-  (`app.heartbeat_ttl`, default `30s`) acts as the grace period so transient
-  outages don't trigger premature deletion. Set it to `0` to disable heartbeats
-  and cross-host GC (preserving the prior, owner-only removal behavior). (#13)
+- **Cross-host garbage collection of orphaned records.** Each host announces
+  itself under a heartbeat prefix outside `etcd.path_prefix`. With heartbeats
+  enabled (`app.heartbeat_ttl > 0`, default `30s`) it publishes a lease-backed
+  key and keeps it alive; reconciliation removes records whose owner has neither
+  a live heartbeat nor an opt-out marker, cleaning up after
+  permanently-decommissioned nodes. The lease TTL is the grace period, so
+  transient outages don't trigger premature deletion. A host with
+  `app.heartbeat_ttl <= 0` instead writes a **persistent opt-out marker**: it
+  runs no cross-host GC and its records are never GC'd by peers. A host runs GC
+  only while it is itself actively heartbeating (so a failed heartbeat
+  registration disables its GC rather than letting it act on liveness it can't
+  vouch for), and the liveness lookup uses a linearizable etcd read because it
+  authorizes deletions. (#13)
 - **Prominent startup warning** when `app.host_ipv4`/`app.host_ipv6` is unset,
   making it obvious that value-less A/AAAA records will be skipped. (#16)
 
@@ -74,8 +80,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Notes
 - When upgrading a multi-host fleet, roll out to all hosts together: a host
-  running an older version won't publish a heartbeat and could be treated as
-  dead by upgraded hosts.
+  running an older version publishes neither a heartbeat nor an opt-out marker,
+  so it could be treated as dead by upgraded hosts and have its records GC'd.
+- Decommissioning a host that ran with `app.heartbeat_ttl <= 0` requires
+  manually deleting its records and its opt-out marker under
+  `/docker-coredns-sync/heartbeat/<hostname>` — they are exempt from automatic
+  GC by design.
 
 ## [0.6.1] - 2026-06-17
 

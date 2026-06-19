@@ -9,15 +9,46 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-func TestEtcdRegistry_StartHeartbeat_Disabled(t *testing.T) {
+func TestEtcdRegistry_StartHeartbeat_DisabledWritesStaticMarker(t *testing.T) {
 	mock := newMockEtcdClient()
 	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 0, testLogger())
 
 	if err := reg.StartHeartbeat(context.Background()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if mock.grantCalled || mock.putCalled {
-		t.Error("expected no etcd writes when heartbeat is disabled")
+
+	// A disabled host publishes a persistent (unleased) opt-out marker: a Put
+	// with no Grant and no KeepAlive.
+	if mock.grantCalled {
+		t.Error("expected no lease grant when heartbeat is disabled")
+	}
+	if mock.keepAliveCalled {
+		t.Error("expected no keepalive when heartbeat is disabled")
+	}
+	if len(mock.putKeys) != 1 {
+		t.Fatalf("expected 1 put (the static marker), got %d", len(mock.putKeys))
+	}
+	wantKey := "/docker-coredns-sync/heartbeat/docker-host"
+	if mock.putKeys[0] != wantKey {
+		t.Errorf("expected marker key %q, got %q", wantKey, mock.putKeys[0])
+	}
+	if mock.putValues[0] != heartbeatStaticValue {
+		t.Errorf("expected marker value %q, got %q", heartbeatStaticValue, mock.putValues[0])
+	}
+	if reg.hbActive {
+		t.Error("expected hbActive to be false for a disabled host (it must not run GC)")
+	}
+}
+
+func TestEtcdRegistry_StartHeartbeat_DisabledMarkerPutError(t *testing.T) {
+	mock := newMockEtcdClient()
+	mock.putFunc = func(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {
+		return nil, errors.New("boom")
+	}
+	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 0, testLogger())
+
+	if err := reg.StartHeartbeat(context.Background()); err == nil {
+		t.Fatal("expected error when the static marker put fails")
 	}
 }
 
@@ -51,6 +82,9 @@ func TestEtcdRegistry_StartHeartbeat_WritesLeasedKey(t *testing.T) {
 	if reg.hbLease == 0 {
 		t.Error("expected heartbeat lease to be recorded")
 	}
+	if !reg.hbActive {
+		t.Error("expected hbActive to be true after a successful leased heartbeat")
+	}
 }
 
 func TestEtcdRegistry_StartHeartbeat_GrantError(t *testing.T) {
@@ -62,6 +96,9 @@ func TestEtcdRegistry_StartHeartbeat_GrantError(t *testing.T) {
 
 	if err := reg.StartHeartbeat(context.Background()); err == nil {
 		t.Fatal("expected error when grant fails")
+	}
+	if reg.hbActive {
+		t.Error("expected hbActive to stay false after a failed start")
 	}
 }
 
@@ -102,22 +139,24 @@ func TestEtcdRegistry_Close_NoHeartbeatStarted(t *testing.T) {
 	mock := newMockEtcdClient()
 	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 0, testLogger())
 
-	// stopHeartbeat must be a no-op (no delete/revoke) when never started.
+	// stopHeartbeat must be a no-op (no delete/revoke) when no leased heartbeat
+	// was started — including for a disabled host, whose persistent marker must
+	// survive shutdown.
 	if err := reg.Close(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if mock.deleteCalled || mock.revokeCalled {
-		t.Error("expected no heartbeat cleanup when heartbeat was never started")
+		t.Error("expected no heartbeat cleanup when no leased heartbeat was started")
 	}
 }
 
-func TestEtcdRegistry_GetLiveHostnames_SkipsEmptySuffix(t *testing.T) {
+func TestEtcdRegistry_GetLiveHostnames_NotActiveReturnsNil(t *testing.T) {
+	// Enabled by config, but StartHeartbeat was never run (or failed): the host
+	// must not reap any peer's records.
 	mock := newMockEtcdClient()
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
-		return &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{
-			{Key: []byte("/docker-coredns-sync/heartbeat/")}, // malformed: empty hostname
-			{Key: []byte("/docker-coredns-sync/heartbeat/host-a")},
-		}}, nil
+		t.Error("Get must not be called when this host is not actively heartbeating")
+		return &clientv3.GetResponse{}, nil
 	}
 	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 30, testLogger())
 
@@ -125,15 +164,12 @@ func TestEtcdRegistry_GetLiveHostnames_SkipsEmptySuffix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, ok := live[""]; ok {
-		t.Error("expected empty hostname to be skipped")
-	}
-	if _, ok := live["host-a"]; !ok {
-		t.Error("expected host-a to be present")
+	if live != nil {
+		t.Errorf("expected nil set when not actively heartbeating, got %v", live)
 	}
 }
 
-func TestEtcdRegistry_GetLiveHostnames_Disabled(t *testing.T) {
+func TestEtcdRegistry_GetLiveHostnames_DisabledReturnsNil(t *testing.T) {
 	mock := newMockEtcdClient()
 	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 0, testLogger())
 
@@ -146,6 +182,25 @@ func TestEtcdRegistry_GetLiveHostnames_Disabled(t *testing.T) {
 	}
 }
 
+func TestEtcdRegistry_GetLiveHostnames_FailedStartLeavesGCDisabled(t *testing.T) {
+	mock := newMockEtcdClient()
+	mock.grantFunc = func(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error) {
+		return nil, errors.New("boom")
+	}
+	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 30, testLogger())
+
+	if err := reg.StartHeartbeat(context.Background()); err == nil {
+		t.Fatal("expected StartHeartbeat to fail")
+	}
+	live, err := reg.GetLiveHostnames(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if live != nil {
+		t.Errorf("expected GC disabled (nil set) after a failed heartbeat start, got %v", live)
+	}
+}
+
 func TestEtcdRegistry_GetLiveHostnames_ParsesKeysAndIncludesSelf(t *testing.T) {
 	mock := newMockEtcdClient()
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
@@ -155,6 +210,7 @@ func TestEtcdRegistry_GetLiveHostnames_ParsesKeysAndIncludesSelf(t *testing.T) {
 		}}, nil
 	}
 	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 30, testLogger())
+	reg.hbActive = true // simulate a started heartbeat
 
 	live, err := reg.GetLiveHostnames(context.Background())
 	if err != nil {
@@ -170,12 +226,36 @@ func TestEtcdRegistry_GetLiveHostnames_ParsesKeysAndIncludesSelf(t *testing.T) {
 	}
 }
 
+func TestEtcdRegistry_GetLiveHostnames_SkipsEmptySuffix(t *testing.T) {
+	mock := newMockEtcdClient()
+	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+		return &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{
+			{Key: []byte("/docker-coredns-sync/heartbeat/")}, // malformed: empty hostname
+			{Key: []byte("/docker-coredns-sync/heartbeat/host-a")},
+		}}, nil
+	}
+	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 30, testLogger())
+	reg.hbActive = true
+
+	live, err := reg.GetLiveHostnames(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := live[""]; ok {
+		t.Error("expected empty hostname to be skipped")
+	}
+	if _, ok := live["host-a"]; !ok {
+		t.Error("expected host-a to be present")
+	}
+}
+
 func TestEtcdRegistry_GetLiveHostnames_GetError(t *testing.T) {
 	mock := newMockEtcdClient()
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 		return nil, errors.New("boom")
 	}
 	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 30, testLogger())
+	reg.hbActive = true
 
 	if _, err := reg.GetLiveHostnames(context.Background()); err == nil {
 		t.Fatal("expected error when get fails")

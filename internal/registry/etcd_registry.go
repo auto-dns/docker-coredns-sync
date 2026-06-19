@@ -28,6 +28,13 @@ type registryMetrics interface {
 // never parses them as DNS records.
 const heartbeatPrefix = "/docker-coredns-sync/heartbeat"
 
+// heartbeatStaticValue marks a host that has opted out of leased heartbeats
+// (heartbeat_ttl <= 0). Its key is persistent (no lease): the host announces it
+// exists so peers never mistake it for a dead owner and GC its records, but it
+// does not itself participate in cross-host GC. Decommissioning such a host
+// requires manually deleting its records and this marker.
+const heartbeatStaticValue = "static"
+
 type EtcdRegistry struct {
 	client       etcdClient
 	cfg          *config.EtcdConfig
@@ -39,6 +46,10 @@ type EtcdRegistry struct {
 	hbMu     sync.Mutex
 	hbLease  clientv3.LeaseID
 	hbCancel context.CancelFunc
+	// hbActive is true only while this host holds a live leased heartbeat. It
+	// gates cross-host GC: a host that is not actively heartbeating (disabled,
+	// or StartHeartbeat failed) must not garbage-collect any peer's records.
+	hbActive bool
 }
 
 func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string, heartbeatTTL int, logger zerolog.Logger) *EtcdRegistry {
@@ -73,23 +84,37 @@ func heartbeatKey(hostname string) string {
 	return fmt.Sprintf("%s/%s", heartbeatPrefix, hostname)
 }
 
-// StartHeartbeat publishes this host's liveness key under a lease and keeps the
-// lease alive for the lifetime of ctx. When heartbeats are disabled
-// (heartbeatTTL <= 0) it is a no-op. The presence of this key is how other
-// hosts know this host is still alive and that its records must not be GC'd.
+// StartHeartbeat announces this host's presence in etcd so peers never treat its
+// records as orphaned.
+//
+// When heartbeats are enabled (heartbeatTTL > 0) it publishes a lease-backed
+// liveness key and keeps the lease alive for the lifetime of ctx; only then does
+// this host participate in cross-host GC (see GetLiveHostnames). When disabled
+// (heartbeatTTL <= 0) it instead writes a persistent, unleased opt-out marker:
+// peers will never GC this host's records, and this host runs no GC itself.
 func (er *EtcdRegistry) StartHeartbeat(ctx context.Context) error {
+	key := heartbeatKey(er.hostname)
+
 	if er.heartbeatTTL <= 0 {
-		er.logger.Info().Msg("heartbeat disabled (heartbeat_ttl <= 0); cross-host GC will not run")
+		// Persistent (unleased) marker: it outlives this process so a host that
+		// has deliberately opted out of heartbeats is never mistaken for a dead
+		// one. No keepalive, and hbActive stays false so we run no cross-host GC.
+		if _, err := er.client.Put(ctx, key, heartbeatStaticValue); err != nil {
+			er.incEtcdError()
+			return fmt.Errorf("put static heartbeat marker %q: %w", key, err)
+		}
+		er.logger.Info().Str("key", key).Msg("heartbeat disabled (heartbeat_ttl <= 0); published persistent opt-out marker; this host runs no cross-host GC and its records are exempt from GC by peers")
 		return nil
 	}
 
 	leaseResp, err := er.client.Grant(ctx, int64(er.heartbeatTTL))
 	if err != nil {
+		er.incEtcdError()
 		return fmt.Errorf("grant heartbeat lease: %w", err)
 	}
 
-	key := heartbeatKey(er.hostname)
 	if _, err := er.client.Put(ctx, key, er.hostname, clientv3.WithLease(leaseResp.ID)); err != nil {
+		er.incEtcdError()
 		_, _ = er.client.Revoke(ctx, leaseResp.ID)
 		return fmt.Errorf("put heartbeat key %q: %w", key, err)
 	}
@@ -97,6 +122,7 @@ func (er *EtcdRegistry) StartHeartbeat(ctx context.Context) error {
 	kaCtx, cancel := context.WithCancel(ctx)
 	kaCh, err := er.client.KeepAlive(kaCtx, leaseResp.ID)
 	if err != nil {
+		er.incEtcdError()
 		cancel()
 		_, _ = er.client.Delete(ctx, key)
 		_, _ = er.client.Revoke(ctx, leaseResp.ID)
@@ -106,6 +132,7 @@ func (er *EtcdRegistry) StartHeartbeat(ctx context.Context) error {
 	er.hbMu.Lock()
 	er.hbLease = leaseResp.ID
 	er.hbCancel = cancel
+	er.hbActive = true
 	er.hbMu.Unlock()
 
 	// Drain keepalive responses until cancel; presence keeps the lease alive.
@@ -125,8 +152,12 @@ func (er *EtcdRegistry) stopHeartbeat() {
 	lease := er.hbLease
 	er.hbCancel = nil
 	er.hbLease = 0
+	er.hbActive = false
 	er.hbMu.Unlock()
 
+	// Only a leased heartbeat is torn down here. A disabled host's persistent
+	// opt-out marker is intentionally left in place so its records stay exempt
+	// across restarts.
 	if cancel == nil {
 		return
 	}
@@ -142,17 +173,30 @@ func (er *EtcdRegistry) stopHeartbeat() {
 	}
 }
 
-// GetLiveHostnames returns the set of hostnames with a live heartbeat key.
-// It returns (nil, nil) when heartbeats are disabled, which callers must treat
-// as "cross-host GC disabled" — never as "every host is dead".
+// GetLiveHostnames returns the set of hostnames whose records must not be
+// garbage-collected: every host that has announced itself under the heartbeat
+// prefix — both live leased heartbeats and persistent opt-out markers.
+//
+// It returns (nil, nil) unless this host is itself actively heartbeating, which
+// callers must treat as "cross-host GC disabled" — never as "every host is
+// dead". This guarantees a host that has disabled heartbeats, or whose
+// StartHeartbeat failed, never reaps a peer's records.
+//
+// The read is linearizable (no WithSerializable): it authorizes deletions, so a
+// stale read from a lagging member that omitted a live host could otherwise
+// destroy that host's records.
 func (er *EtcdRegistry) GetLiveHostnames(ctx context.Context) (map[string]struct{}, error) {
-	if er.heartbeatTTL <= 0 {
+	er.hbMu.Lock()
+	active := er.hbActive
+	er.hbMu.Unlock()
+	if !active {
 		return nil, nil
 	}
 
 	base := heartbeatPrefix
-	resp, err := er.client.Get(ctx, base+"/", clientv3.WithPrefix(), clientv3.WithKeysOnly(), clientv3.WithSerializable())
+	resp, err := er.client.Get(ctx, base+"/", clientv3.WithPrefix(), clientv3.WithKeysOnly())
 	if err != nil {
+		er.incEtcdError()
 		return nil, fmt.Errorf("list heartbeat keys under %q: %w", base, err)
 	}
 
