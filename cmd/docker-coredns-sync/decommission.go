@@ -40,10 +40,11 @@ var defaultDecommissionerFactory DecommissionerFactory = func(cfg *config.Config
 
 // HostChoice is a host presented for interactive selection.
 type HostChoice struct {
-	Hostname    string
-	RecordCount int
-	HasMarker   bool
-	IsThisHost  bool
+	Hostname        string
+	RecordCount     int
+	HasMarker       bool
+	ActiveHeartbeat bool
+	IsThisHost      bool
 }
 
 // hostPrompter abstracts the interactive UI so the command flow stays testable.
@@ -75,15 +76,24 @@ same etcd cluster, and it is safe to run more than once.`,
 		if len(args) == 1 {
 			hostname = args[0]
 		}
-		return runDecommissionWithDeps(cmd.Context(), cfg, hostname, defaultDecommissionerFactory, &promptuiPrompter{}, cmd.OutOrStdout())
+		skipConfirm, _ := cmd.Flags().GetBool("yes")
+		return runDecommissionWithDeps(cmd.Context(), cfg, hostname, defaultDecommissionerFactory, &promptuiPrompter{}, skipConfirm, cmd.OutOrStdout())
 	},
 }
 
 func init() {
+	decommissionCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt (required for non-interactive use)")
 	rootCmd.AddCommand(decommissionCmd)
 }
 
-func runDecommissionWithDeps(ctx context.Context, cfg *config.Config, hostname string, factory DecommissionerFactory, prompter hostPrompter, out io.Writer) error {
+// eligibleToDecommission reports whether a host may be decommissioned. A foreign
+// host with a live heartbeat is still running and must not be removed; the local
+// host is always eligible (the operator is expected to have stopped its daemon).
+func eligibleToDecommission(h registry.HostSummary, isLocal bool) bool {
+	return isLocal || !h.ActiveHeartbeat
+}
+
+func runDecommissionWithDeps(ctx context.Context, cfg *config.Config, hostname string, factory DecommissionerFactory, prompter hostPrompter, skipConfirm bool, out io.Writer) error {
 	log := logger.SetupLogger(&cfg.Logging)
 
 	d, err := factory(cfg, log)
@@ -96,27 +106,36 @@ func runDecommissionWithDeps(ctx context.Context, cfg *config.Config, hostname s
 		}
 	}()
 
+	hosts, err := d.ListHosts(ctx)
+	if err != nil {
+		return fmt.Errorf("list hosts: %w", err)
+	}
+	byName := make(map[string]registry.HostSummary, len(hosts))
+	for _, h := range hosts {
+		byName[h.Hostname] = h
+	}
+
 	hostname = strings.TrimSpace(hostname)
 
 	if hostname == "" {
-		// Interactive selection.
-		hosts, err := d.ListHosts(ctx)
-		if err != nil {
-			return fmt.Errorf("list hosts: %w", err)
-		}
-		if len(hosts) == 0 {
-			fmt.Fprintln(out, "No hosts found in the registry.")
-			return nil
-		}
-
-		choices := make([]HostChoice, len(hosts))
-		for i, h := range hosts {
-			choices[i] = HostChoice{
-				Hostname:    h.Hostname,
-				RecordCount: h.RecordCount,
-				HasMarker:   h.HasMarker,
-				IsThisHost:  h.Hostname == cfg.App.Hostname,
+		// Interactive selection — offer only hosts that may be decommissioned.
+		choices := make([]HostChoice, 0, len(hosts))
+		for _, h := range hosts {
+			isLocal := h.Hostname == cfg.App.Hostname
+			if !eligibleToDecommission(h, isLocal) {
+				continue
 			}
+			choices = append(choices, HostChoice{
+				Hostname:        h.Hostname,
+				RecordCount:     h.RecordCount,
+				HasMarker:       h.HasMarker,
+				ActiveHeartbeat: h.ActiveHeartbeat,
+				IsThisHost:      isLocal,
+			})
+		}
+		if len(choices) == 0 {
+			fmt.Fprintln(out, "No hosts are eligible for decommissioning (a foreign host with an active heartbeat can't be removed while it's running).")
+			return nil
 		}
 
 		selected, err := prompter.SelectHost(choices)
@@ -124,7 +143,13 @@ func runDecommissionWithDeps(ctx context.Context, cfg *config.Config, hostname s
 			return err
 		}
 		hostname = selected
+	} else if h, ok := byName[hostname]; ok {
+		if !eligibleToDecommission(h, hostname == cfg.App.Hostname) {
+			return fmt.Errorf("refusing to decommission %q: it has an active heartbeat (its daemon appears to be running) — stop it first", hostname)
+		}
+	}
 
+	if !skipConfirm {
 		ok, err := prompter.Confirm(fmt.Sprintf("Decommission %q? This deletes its marker and all of its records", hostname))
 		if err != nil {
 			return err
@@ -144,17 +169,23 @@ func runDecommissionWithDeps(ctx context.Context, cfg *config.Config, hostname s
 	return nil
 }
 
-// formatHostChoice renders a host menu entry, labelling the local host clearly.
+// formatHostChoice renders a host menu entry, labelling the local host clearly
+// and noting its heartbeat status.
 func formatHostChoice(h HostChoice) string {
 	name := h.Hostname
 	if h.IsThisHost {
 		name = fmt.Sprintf("This host (%s)", h.Hostname)
 	}
-	parts := []string{fmt.Sprintf("%d record(s)", h.RecordCount)}
-	if !h.HasMarker {
-		parts = append(parts, "no heartbeat")
+	var status string
+	switch {
+	case h.ActiveHeartbeat:
+		status = "active heartbeat"
+	case h.HasMarker:
+		status = "opt-out marker"
+	default:
+		status = "no heartbeat"
 	}
-	return fmt.Sprintf("%s — %s", name, strings.Join(parts, ", "))
+	return fmt.Sprintf("%s — %d record(s), %s", name, h.RecordCount, status)
 }
 
 // promptuiPrompter is the real terminal UI, backed by promptui.

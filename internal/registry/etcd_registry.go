@@ -217,7 +217,10 @@ func (er *EtcdRegistry) GetLiveHostnames(ctx context.Context) (map[string]struct
 type HostSummary struct {
 	Hostname    string
 	RecordCount int  // number of DNS records owned by the host
-	HasMarker   bool // whether the host has a heartbeat/opt-out marker present
+	HasMarker   bool // whether the host has any heartbeat/opt-out marker present
+	// ActiveHeartbeat is true when the marker is a live leased heartbeat (the
+	// host's daemon is running), as opposed to a persistent opt-out marker.
+	ActiveHeartbeat bool
 }
 
 // ListHosts returns every host known to the registry — the union of hosts with a
@@ -235,7 +238,9 @@ func (er *EtcdRegistry) ListHosts(ctx context.Context) ([]HostSummary, error) {
 	}
 
 	base := heartbeatPrefix
-	hbResp, err := er.client.Get(ctx, base+"/", clientv3.WithPrefix(), clientv3.WithKeysOnly())
+	// Values are needed (not WithKeysOnly) to tell a live leased heartbeat
+	// (value = hostname) from a persistent opt-out marker (value = "static").
+	hbResp, err := er.client.Get(ctx, base+"/", clientv3.WithPrefix())
 	if err != nil {
 		er.incEtcdError()
 		return nil, fmt.Errorf("list heartbeat keys under %q: %w", base, err)
@@ -245,7 +250,13 @@ func (er *EtcdRegistry) ListHosts(ctx context.Context) ([]HostSummary, error) {
 		if host == "" {
 			continue
 		}
-		get(host).HasMarker = true
+		s := get(host)
+		s.HasMarker = true
+		// Treat anything that isn't the explicit opt-out sentinel as a live
+		// heartbeat — conservative, so an unexpected value blocks deletion.
+		if string(kv.Value) != heartbeatStaticValue {
+			s.ActiveHeartbeat = true
+		}
 	}
 
 	recResp, err := er.client.Get(ctx, er.cfg.PathPrefix, clientv3.WithPrefix())

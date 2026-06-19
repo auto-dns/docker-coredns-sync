@@ -169,21 +169,31 @@ When a host is retired permanently, remove it from the shared registry with the
 every DNS record it owns, so it works whether or not the host used heartbeats and
 whether or not any other host is around to garbage-collect.
 
-Run it with no argument to pick a host interactively — it lists every host known
-to the registry and you choose one with the arrow keys; the machine you're running
-on is shown as `This host (<hostname>)`, and each entry notes its record count and
-whether it still has a heartbeat:
+Run it with no argument to pick a host interactively — it lists the hosts that are
+eligible for removal and you choose one with the arrow keys. The machine you're
+running on is shown as `This host (<hostname>)`, and each entry notes its record
+count and heartbeat status (`active heartbeat`, `opt-out marker`, or `no
+heartbeat`):
 
 ```bash
 docker-coredns-sync decommission
 ```
 
-Or pass a hostname to skip the prompt — **required** when there's no interactive
-terminal (containers, CI, scripts):
+Or pass a hostname to skip the picker — **required** when there's no interactive
+terminal (containers, CI, scripts), where you should also pass `--yes` to skip
+the confirmation prompt:
 
 ```bash
-docker-coredns-sync decommission <hostname>
+docker-coredns-sync decommission <hostname> --yes
 ```
+
+**Safety rules:**
+
+- A **foreign** host with an **active heartbeat** (its daemon is still running)
+  can't be decommissioned — it's filtered out of the interactive list, and naming
+  it explicitly is refused. Stop its daemon first. (A foreign host with only an
+  *opt-out* marker, or none, is fine; so is the local host.)
+- Decommissioning always asks for confirmation unless you pass `--yes` / `-y`.
 
 Run it **after** stopping the target host's daemon (a running daemon would just
 re-publish its marker and records). It can be run from the host being removed or
@@ -197,7 +207,7 @@ daemon uses:
 docker run --rm \
   -v /path/to/config.yaml:/config/config.yaml:ro \
   ghcr.io/auto-dns/docker-coredns-sync:latest \
-  decommission old-node
+  decommission old-node --yes
 ```
 
 Or pass the etcd settings as flags instead of a config file (an `app.hostname`
@@ -205,7 +215,7 @@ value is required by config validation but is irrelevant to this command):
 
 ```bash
 docker run --rm ghcr.io/auto-dns/docker-coredns-sync:latest \
-  decommission old-node \
+  decommission old-node --yes \
   --etcd-endpoints http://etcd:2379 \
   --etcd.path-prefix /skydns \
   --app.hostname cleanup

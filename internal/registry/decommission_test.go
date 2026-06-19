@@ -12,8 +12,12 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-func markerKV(host string) *mvccpb.KeyValue {
-	return &mvccpb.KeyValue{Key: []byte(heartbeatPrefix + "/" + host)}
+func liveMarkerKV(host string) *mvccpb.KeyValue {
+	return &mvccpb.KeyValue{Key: []byte(heartbeatPrefix + "/" + host), Value: []byte(host)}
+}
+
+func optOutMarkerKV(host string) *mvccpb.KeyValue {
+	return &mvccpb.KeyValue{Key: []byte(heartbeatPrefix + "/" + host), Value: []byte(heartbeatStaticValue)}
 }
 
 func TestEtcdRegistry_ListHosts_UnionOfMarkersAndOwners(t *testing.T) {
@@ -21,8 +25,9 @@ func TestEtcdRegistry_ListHosts_UnionOfMarkersAndOwners(t *testing.T) {
 	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
 		if strings.HasPrefix(key, heartbeatPrefix) {
 			return &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{
-				markerKV("host-a"),
-				markerKV("host-b"),
+				liveMarkerKV("host-a"),
+				liveMarkerKV("host-b"),
+				optOutMarkerKV("host-d"),
 			}}, nil
 		}
 		return &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{
@@ -38,14 +43,15 @@ func TestEtcdRegistry_ListHosts_UnionOfMarkersAndOwners(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Sorted union: host-a (marker only), host-b (marker + 2 records), host-c (records only).
-	if len(hosts) != 3 {
-		t.Fatalf("expected 3 hosts, got %d (%+v)", len(hosts), hosts)
-	}
+	// Sorted union: live markers (a, b), records-only (c), opt-out marker (d).
 	want := []HostSummary{
-		{Hostname: "host-a", RecordCount: 0, HasMarker: true},
-		{Hostname: "host-b", RecordCount: 2, HasMarker: true},
-		{Hostname: "host-c", RecordCount: 1, HasMarker: false},
+		{Hostname: "host-a", RecordCount: 0, HasMarker: true, ActiveHeartbeat: true},
+		{Hostname: "host-b", RecordCount: 2, HasMarker: true, ActiveHeartbeat: true},
+		{Hostname: "host-c", RecordCount: 1, HasMarker: false, ActiveHeartbeat: false},
+		{Hostname: "host-d", RecordCount: 0, HasMarker: true, ActiveHeartbeat: false},
+	}
+	if len(hosts) != len(want) {
+		t.Fatalf("expected %d hosts, got %d (%+v)", len(want), len(hosts), hosts)
 	}
 	for i, w := range want {
 		if hosts[i] != w {

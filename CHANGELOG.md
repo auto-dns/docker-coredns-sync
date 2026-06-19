@@ -65,7 +65,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   registry: it deletes the host's heartbeat/opt-out marker and every DNS record
   it owns. Run with no argument to pick a host interactively (arrow keys; the
   local host is shown as "This host (<hostname>)"), or pass a hostname to skip the
-  prompt for containers/CI. Idempotent, runnable from the host itself or any
+  picker for containers/CI. Always asks for confirmation unless `--yes`/`-y` is
+  given. A foreign host with an active heartbeat (its daemon is still running)
+  can't be decommissioned. Idempotent, runnable from the host itself or any
   machine that can reach etcd. (#13)
 
 ### Changed
