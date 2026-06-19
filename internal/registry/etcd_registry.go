@@ -213,6 +213,66 @@ func (er *EtcdRegistry) GetLiveHostnames(ctx context.Context) (map[string]struct
 	return live, nil
 }
 
+// HostSummary describes a host known to the registry, for listing/selection.
+type HostSummary struct {
+	Hostname    string
+	RecordCount int  // number of DNS records owned by the host
+	HasMarker   bool // whether the host has a heartbeat/opt-out marker present
+}
+
+// ListHosts returns every host known to the registry — the union of hosts with a
+// heartbeat/opt-out marker and hosts that own at least one DNS record — sorted by
+// hostname. It is used to present a selection of hosts to decommission.
+func (er *EtcdRegistry) ListHosts(ctx context.Context) ([]HostSummary, error) {
+	summaries := map[string]*HostSummary{}
+	get := func(host string) *HostSummary {
+		s := summaries[host]
+		if s == nil {
+			s = &HostSummary{Hostname: host}
+			summaries[host] = s
+		}
+		return s
+	}
+
+	base := heartbeatPrefix
+	hbResp, err := er.client.Get(ctx, base+"/", clientv3.WithPrefix(), clientv3.WithKeysOnly())
+	if err != nil {
+		er.incEtcdError()
+		return nil, fmt.Errorf("list heartbeat keys under %q: %w", base, err)
+	}
+	for _, kv := range hbResp.Kvs {
+		host := strings.TrimPrefix(string(kv.Key), base+"/")
+		if host == "" {
+			continue
+		}
+		get(host).HasMarker = true
+	}
+
+	recResp, err := er.client.Get(ctx, er.cfg.PathPrefix, clientv3.WithPrefix())
+	if err != nil {
+		er.incEtcdError()
+		return nil, fmt.Errorf("list under prefix %q: %w", er.cfg.PathPrefix, err)
+	}
+	for _, kv := range recResp.Kvs {
+		var wire etcdRecord
+		if err := json.Unmarshal(kv.Value, &wire); err != nil {
+			er.logger.Warn().Err(err).Str("key", string(kv.Key)).Msg("list hosts: skipping unparseable record")
+			continue
+		}
+		if wire.OwnerHostname == "" {
+			continue
+		}
+		get(wire.OwnerHostname).RecordCount++
+	}
+
+	out := make([]HostSummary, 0, len(summaries))
+	for _, s := range summaries {
+		out = append(out, *s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Hostname < out[j].Hostname })
+	return out, nil
+}
+
 // DecommissionHost permanently removes a host from the shared registry: it
 // deletes the host's heartbeat/opt-out marker and every DNS record it owns. It
 // is safe to run from any machine that can reach etcd (including a throwaway

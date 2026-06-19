@@ -167,7 +167,19 @@ liveness lookup uses a linearizable etcd read, since it authorizes deletions.
 When a host is retired permanently, remove it from the shared registry with the
 `decommission` subcommand. It deletes that host's heartbeat/opt-out marker **and**
 every DNS record it owns, so it works whether or not the host used heartbeats and
-whether or not any other host is around to garbage-collect:
+whether or not any other host is around to garbage-collect.
+
+Run it with no argument to pick a host interactively — it lists every host known
+to the registry and you choose one with the arrow keys; the machine you're running
+on is shown as `This host (<hostname>)`, and each entry notes its record count and
+whether it still has a heartbeat:
+
+```bash
+docker-coredns-sync decommission
+```
+
+Or pass a hostname to skip the prompt — **required** when there's no interactive
+terminal (containers, CI, scripts):
 
 ```bash
 docker-coredns-sync decommission <hostname>

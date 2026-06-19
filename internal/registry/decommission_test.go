@@ -4,12 +4,85 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/auto-dns/docker-coredns-sync/internal/domain"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
+
+func markerKV(host string) *mvccpb.KeyValue {
+	return &mvccpb.KeyValue{Key: []byte(heartbeatPrefix + "/" + host)}
+}
+
+func TestEtcdRegistry_ListHosts_UnionOfMarkersAndOwners(t *testing.T) {
+	mock := newMockEtcdClient()
+	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+		if strings.HasPrefix(key, heartbeatPrefix) {
+			return &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{
+				markerKV("host-a"),
+				markerKV("host-b"),
+			}}, nil
+		}
+		return &clientv3.GetResponse{Kvs: []*mvccpb.KeyValue{
+			ownedRecordKV("/skydns/com/example/a/x1", "host-b", "10.0.0.1"),
+			ownedRecordKV("/skydns/com/example/b/x1", "host-b", "10.0.0.2"),
+			ownedRecordKV("/skydns/com/example/c/x1", "host-c", "10.0.0.3"),
+		}}, nil
+	}
+	reg := NewEtcdRegistry(mock, testConfig(), "ops-host", 0, testLogger())
+
+	hosts, err := reg.ListHosts(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Sorted union: host-a (marker only), host-b (marker + 2 records), host-c (records only).
+	if len(hosts) != 3 {
+		t.Fatalf("expected 3 hosts, got %d (%+v)", len(hosts), hosts)
+	}
+	want := []HostSummary{
+		{Hostname: "host-a", RecordCount: 0, HasMarker: true},
+		{Hostname: "host-b", RecordCount: 2, HasMarker: true},
+		{Hostname: "host-c", RecordCount: 1, HasMarker: false},
+	}
+	for i, w := range want {
+		if hosts[i] != w {
+			t.Errorf("host[%d] = %+v, want %+v", i, hosts[i], w)
+		}
+	}
+}
+
+func TestEtcdRegistry_ListHosts_MarkerListError(t *testing.T) {
+	mock := newMockEtcdClient()
+	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+		if strings.HasPrefix(key, heartbeatPrefix) {
+			return nil, errors.New("boom")
+		}
+		return &clientv3.GetResponse{}, nil
+	}
+	reg := NewEtcdRegistry(mock, testConfig(), "ops-host", 0, testLogger())
+
+	if _, err := reg.ListHosts(context.Background()); err == nil {
+		t.Fatal("expected error when listing heartbeat markers fails")
+	}
+}
+
+func TestEtcdRegistry_ListHosts_RecordListError(t *testing.T) {
+	mock := newMockEtcdClient()
+	mock.getFunc = func(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error) {
+		if strings.HasPrefix(key, heartbeatPrefix) {
+			return &clientv3.GetResponse{}, nil
+		}
+		return nil, errors.New("boom")
+	}
+	reg := NewEtcdRegistry(mock, testConfig(), "ops-host", 0, testLogger())
+
+	if _, err := reg.ListHosts(context.Background()); err == nil {
+		t.Fatal("expected error when listing records fails")
+	}
+}
 
 func ownedRecordKV(key, owner, host string) *mvccpb.KeyValue {
 	b, _ := json.Marshal(etcdRecord{
