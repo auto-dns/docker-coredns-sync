@@ -61,6 +61,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   authorizes deletions. (#13)
 - **Prominent startup warning** when `app.host_ipv4`/`app.host_ipv6` is unset,
   making it obvious that value-less A/AAAA records will be skipped. (#16)
+- **`decommission <hostname>` subcommand** to permanently remove a host from the
+  shared registry: it deletes the host's heartbeat/opt-out marker and every DNS
+  record it owns. Idempotent, runnable from the host itself or any machine that
+  can reach etcd (e.g. a throwaway container with the config mounted). (#13)
 
 ### Changed
 - The Docker event stream now reconnects automatically with bounded
@@ -82,10 +86,9 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - When upgrading a multi-host fleet, roll out to all hosts together: a host
   running an older version publishes neither a heartbeat nor an opt-out marker,
   so it could be treated as dead by upgraded hosts and have its records GC'd.
-- Decommissioning a host that ran with `app.heartbeat_ttl <= 0` requires
-  manually deleting its records and its opt-out marker under
-  `/docker-coredns-sync/heartbeat/<hostname>` — they are exempt from automatic
-  GC by design.
+- A host that ran with `app.heartbeat_ttl <= 0` has its records exempt from
+  automatic GC by design; retire it with the `decommission <hostname>` subcommand
+  (it removes the host's records and opt-out marker).
 
 ## [0.6.1] - 2026-06-17
 

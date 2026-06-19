@@ -158,13 +158,49 @@ etcd was briefly unreachable at startup), it performs no GC that run — it neve
 deletes a peer's records on the basis of liveness it cannot vouch for. The
 liveness lookup uses a linearizable etcd read, since it authorizes deletions.
 
-> **Decommissioning a host with heartbeats disabled:** because its records are
-> exempt from GC, you must delete them (and its marker under
-> `/docker-coredns-sync/heartbeat/<hostname>`) manually.
-
 > **Upgrading a multi-host fleet:** roll out this version to all hosts together. A host
 > running an older version publishes neither a heartbeat nor an opt-out marker, so it
 > will look "dead" to upgraded hosts, which would then GC its records.
+
+### Decommissioning a host
+
+When a host is retired permanently, remove it from the shared registry with the
+`decommission` subcommand. It deletes that host's heartbeat/opt-out marker **and**
+every DNS record it owns, so it works whether or not the host used heartbeats and
+whether or not any other host is around to garbage-collect:
+
+```bash
+docker-coredns-sync decommission <hostname>
+```
+
+Run it **after** stopping the target host's daemon (a running daemon would just
+re-publish its marker and records). It can be run from the host being removed or
+from **any** machine that can reach the same etcd cluster, and it is idempotent.
+
+It only needs the etcd connection settings, so the easiest way to run it from
+anywhere — including a throwaway container — is to mount the same config file the
+daemon uses:
+
+```bash
+docker run --rm \
+  -v /path/to/config.yaml:/config/config.yaml:ro \
+  ghcr.io/auto-dns/docker-coredns-sync:latest \
+  decommission old-node
+```
+
+Or pass the etcd settings as flags instead of a config file (an `app.hostname`
+value is required by config validation but is irrelevant to this command):
+
+```bash
+docker run --rm ghcr.io/auto-dns/docker-coredns-sync:latest \
+  decommission old-node \
+  --etcd-endpoints http://etcd:2379 \
+  --etcd.path-prefix /skydns \
+  --app.hostname cleanup
+```
+
+For an auth/TLS-protected etcd, add the same `--etcd.username` / `--etcd.password`
+/ `--etcd.tls.*` flags (or config keys) you use for the daemon.
 
 ---
 

@@ -213,6 +213,75 @@ func (er *EtcdRegistry) GetLiveHostnames(ctx context.Context) (map[string]struct
 	return live, nil
 }
 
+// DecommissionHost permanently removes a host from the shared registry: it
+// deletes the host's heartbeat/opt-out marker and every DNS record it owns. It
+// is safe to run from any machine that can reach etcd (including a throwaway
+// container) and is idempotent. It returns the number of DNS records deleted.
+//
+// Run it only after the target host's daemon has stopped; otherwise a still-
+// running daemon will simply re-publish its marker and records on the next tick.
+func (er *EtcdRegistry) DecommissionHost(ctx context.Context, hostname string) (int, error) {
+	// 1. Drop the heartbeat/opt-out marker so peers stop treating the host as
+	//    present (and so a disabled host's records lose their GC exemption).
+	hbKey := heartbeatKey(hostname)
+	if _, err := er.client.Delete(ctx, hbKey); err != nil {
+		er.incEtcdError()
+		return 0, fmt.Errorf("delete heartbeat marker %q: %w", hbKey, err)
+	}
+
+	// 2. Delete every DNS record owned by the host under the configured prefix.
+	prefix := er.cfg.PathPrefix
+	resp, err := er.client.Get(ctx, prefix, clientv3.WithPrefix())
+	if err != nil {
+		er.incEtcdError()
+		return 0, fmt.Errorf("list under prefix %q: %w", prefix, err)
+	}
+
+	toDelete := make([]string, 0)
+	for _, kv := range resp.Kvs {
+		var wire etcdRecord
+		if err := json.Unmarshal(kv.Value, &wire); err != nil {
+			er.logger.Warn().Err(err).Str("key", string(kv.Key)).Msg("decommission: skipping unparseable record")
+			continue
+		}
+		if wire.OwnerHostname == hostname {
+			toDelete = append(toDelete, string(kv.Key))
+		}
+	}
+
+	deleted, err := er.deleteKeys(ctx, toDelete)
+	er.logger.Info().Str("hostname", hostname).Int("records_deleted", deleted).Msg("decommissioned host")
+	return deleted, err
+}
+
+// deleteKeys deletes the given keys in bounded batches, returning the number
+// successfully deleted and the first error encountered (it keeps going on error).
+func (er *EtcdRegistry) deleteKeys(ctx context.Context, keys []string) (int, error) {
+	const batchSize = 64
+	var firstErr error
+	deleted := 0
+	for i := 0; i < len(keys); i += batchSize {
+		end := i + batchSize
+		if end > len(keys) {
+			end = len(keys)
+		}
+		batch := keys[i:end]
+		ops := make([]clientv3.Op, 0, len(batch))
+		for _, k := range batch {
+			ops = append(ops, clientv3.OpDelete(k))
+		}
+		if _, err := er.client.Txn(ctx).Then(ops...).Commit(); err != nil {
+			er.incEtcdError()
+			if firstErr == nil {
+				firstErr = fmt.Errorf("batch delete [%d:%d]: %w", i, end, err)
+			}
+			continue
+		}
+		deleted += len(batch)
+	}
+	return deleted, firstErr
+}
+
 // getNextIndexedKey generates a new etcd key for a record based on its fully qualified domain name (fqdn).
 func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (string, error) {
 	base := keyBaseForFQDN(er.cfg.PathPrefix, fqdn)
