@@ -16,6 +16,7 @@ func validConfig() *Config {
 			HostIPv6:          "::1",
 			Hostname:          "test-host",
 			PollInterval:      5,
+			HeartbeatTTL:      30,
 		},
 		Etcd: EtcdConfig{
 			Endpoints:         []string{"http://localhost:2379"},
@@ -151,6 +152,24 @@ func TestConfig_Validate_NegativePollInterval(t *testing.T) {
 
 	if err == nil {
 		t.Error("expected error for negative PollInterval")
+	}
+}
+
+func TestConfig_Validate_ZeroHeartbeatTTL(t *testing.T) {
+	cfg := validConfig()
+	cfg.App.HeartbeatTTL = 0
+
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error for zero HeartbeatTTL")
+	}
+}
+
+func TestConfig_Validate_NegativeHeartbeatTTL(t *testing.T) {
+	cfg := validConfig()
+	cfg.App.HeartbeatTTL = -1
+
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error for negative HeartbeatTTL")
 	}
 }
 

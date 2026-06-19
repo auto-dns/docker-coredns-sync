@@ -39,6 +39,10 @@ type EtcdRegistry struct {
 	hbMu     sync.Mutex
 	hbLease  clientv3.LeaseID
 	hbCancel context.CancelFunc
+	// hbActive is true only while this host holds a live leased heartbeat. It
+	// gates cross-host GC: a host whose StartHeartbeat has not (yet) succeeded
+	// must not garbage-collect any peer's records.
+	hbActive bool
 }
 
 func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string, heartbeatTTL int, logger zerolog.Logger) *EtcdRegistry {
@@ -73,23 +77,21 @@ func heartbeatKey(hostname string) string {
 	return fmt.Sprintf("%s/%s", heartbeatPrefix, hostname)
 }
 
-// StartHeartbeat publishes this host's liveness key under a lease and keeps the
-// lease alive for the lifetime of ctx. When heartbeats are disabled
-// (heartbeatTTL <= 0) it is a no-op. The presence of this key is how other
-// hosts know this host is still alive and that its records must not be GC'd.
+// StartHeartbeat publishes this host's lease-backed liveness key and keeps the
+// lease alive for the lifetime of ctx. Heartbeating is mandatory: a host only
+// participates in cross-host GC (see GetLiveHostnames) once this succeeds, and
+// peers treat a host whose lease has expired as gone and reclaim its records.
 func (er *EtcdRegistry) StartHeartbeat(ctx context.Context) error {
-	if er.heartbeatTTL <= 0 {
-		er.logger.Info().Msg("heartbeat disabled (heartbeat_ttl <= 0); cross-host GC will not run")
-		return nil
-	}
+	key := heartbeatKey(er.hostname)
 
 	leaseResp, err := er.client.Grant(ctx, int64(er.heartbeatTTL))
 	if err != nil {
+		er.incEtcdError()
 		return fmt.Errorf("grant heartbeat lease: %w", err)
 	}
 
-	key := heartbeatKey(er.hostname)
 	if _, err := er.client.Put(ctx, key, er.hostname, clientv3.WithLease(leaseResp.ID)); err != nil {
+		er.incEtcdError()
 		_, _ = er.client.Revoke(ctx, leaseResp.ID)
 		return fmt.Errorf("put heartbeat key %q: %w", key, err)
 	}
@@ -97,6 +99,7 @@ func (er *EtcdRegistry) StartHeartbeat(ctx context.Context) error {
 	kaCtx, cancel := context.WithCancel(ctx)
 	kaCh, err := er.client.KeepAlive(kaCtx, leaseResp.ID)
 	if err != nil {
+		er.incEtcdError()
 		cancel()
 		_, _ = er.client.Delete(ctx, key)
 		_, _ = er.client.Revoke(ctx, leaseResp.ID)
@@ -106,6 +109,7 @@ func (er *EtcdRegistry) StartHeartbeat(ctx context.Context) error {
 	er.hbMu.Lock()
 	er.hbLease = leaseResp.ID
 	er.hbCancel = cancel
+	er.hbActive = true
 	er.hbMu.Unlock()
 
 	// Drain keepalive responses until cancel; presence keeps the lease alive.
@@ -125,8 +129,12 @@ func (er *EtcdRegistry) stopHeartbeat() {
 	lease := er.hbLease
 	er.hbCancel = nil
 	er.hbLease = 0
+	er.hbActive = false
 	er.hbMu.Unlock()
 
+	// Nothing to tear down if a heartbeat was never started (e.g. StartHeartbeat
+	// failed). On a clean shutdown the key is removed and the lease revoked so
+	// peers notice the host is gone promptly rather than waiting out the TTL.
 	if cancel == nil {
 		return
 	}
@@ -142,17 +150,29 @@ func (er *EtcdRegistry) stopHeartbeat() {
 	}
 }
 
-// GetLiveHostnames returns the set of hostnames with a live heartbeat key.
-// It returns (nil, nil) when heartbeats are disabled, which callers must treat
-// as "cross-host GC disabled" — never as "every host is dead".
+// GetLiveHostnames returns the set of hostnames with a live heartbeat key —
+// the hosts whose records must not be garbage-collected.
+//
+// It returns (nil, nil) unless this host is itself actively heartbeating, which
+// callers must treat as "cross-host GC disabled" — never as "every host is
+// dead". This guarantees a host whose StartHeartbeat failed never reaps a peer's
+// records.
+//
+// The read is linearizable (no WithSerializable): it authorizes deletions, so a
+// stale read from a lagging member that omitted a live host could otherwise
+// destroy that host's records.
 func (er *EtcdRegistry) GetLiveHostnames(ctx context.Context) (map[string]struct{}, error) {
-	if er.heartbeatTTL <= 0 {
+	er.hbMu.Lock()
+	active := er.hbActive
+	er.hbMu.Unlock()
+	if !active {
 		return nil, nil
 	}
 
 	base := heartbeatPrefix
-	resp, err := er.client.Get(ctx, base+"/", clientv3.WithPrefix(), clientv3.WithKeysOnly(), clientv3.WithSerializable())
+	resp, err := er.client.Get(ctx, base+"/", clientv3.WithPrefix(), clientv3.WithKeysOnly())
 	if err != nil {
+		er.incEtcdError()
 		return nil, fmt.Errorf("list heartbeat keys under %q: %w", base, err)
 	}
 

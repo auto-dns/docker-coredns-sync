@@ -60,8 +60,8 @@ type AppConfig struct {
 	RecordTTL uint32 `mapstructure:"record_ttl"`
 	// HeartbeatTTL is the lease TTL in seconds for this host's liveness key.
 	// It doubles as the grace period before another host may garbage-collect
-	// records owned by a host that has stopped renewing. Zero (or negative)
-	// disables heartbeats and cross-host GC entirely.
+	// records owned by a host that has stopped renewing. Heartbeating is always
+	// on; this value must be greater than zero.
 	HeartbeatTTL int `mapstructure:"heartbeat_ttl"`
 }
 
@@ -255,6 +255,9 @@ func (c *Config) validate() error {
 	}
 	if c.App.PollInterval <= 0 {
 		return fmt.Errorf("app.poll_interval must be greater than 0")
+	}
+	if c.App.HeartbeatTTL <= 0 {
+		return fmt.Errorf("app.heartbeat_ttl must be greater than 0")
 	}
 	if len(c.Etcd.Endpoints) == 0 {
 		return fmt.Errorf("etcd.endpoints must have at least one endpoint")
