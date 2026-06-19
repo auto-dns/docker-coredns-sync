@@ -111,7 +111,7 @@ Configuration values can be provided via:
 | `--app.poll-interval` | `app.poll_interval` | `DOCKER_COREDNS_SYNC_APP_POLL_INTERVAL` | `int` | `5` | How often to reconcile the registry (in seconds) |
 | `--app.dry-run` | `app.dry_run` | `DOCKER_COREDNS_SYNC_APP_DRY_RUN` | `bool` | `false` | Log planned etcd changes without applying them |
 | `--app.record-ttl` | `app.record_ttl` | `DOCKER_COREDNS_SYNC_APP_RECORD_TTL` | `uint` | `0` | Default DNS record TTL in seconds (`0` = unset; CoreDNS uses its own default). Overridable per record via a `coredns.<kind>[.<alias>].ttl` label |
-| `--app.heartbeat-ttl` | `app.heartbeat_ttl` | `DOCKER_COREDNS_SYNC_APP_HEARTBEAT_TTL` | `int` | `30` | Lease TTL (seconds) for this host's liveness key. Doubles as the grace period before another host garbage-collects records owned by a host that stopped renewing. `0` or negative disables this host's GC and instead publishes a persistent opt-out marker so its records are never GC'd by peers (see [Multi-host Behavior](#multi-host-behavior--record-garbage-collection)) |
+| `--app.heartbeat-ttl` | `app.heartbeat_ttl` | `DOCKER_COREDNS_SYNC_APP_HEARTBEAT_TTL` | `int` | `30` | Lease TTL (seconds) for this host's liveness key; doubles as the grace period before another host garbage-collects records owned by a host that stopped renewing. Must be greater than 0 (see [Multi-host Behavior](#multi-host-behavior--record-garbage-collection)) |
 | *(config file only)* | `etcd.endpoints` | `DOCKER_COREDNS_SYNC_ETCD_ENDPOINTS` | `[]string` | `["http://localhost:2379"]` | etcd endpoint URLs (supports multiple for cluster) |
 | `--etcd.path-prefix` | `etcd.path_prefix` | `DOCKER_COREDNS_SYNC_ETCD_PATH_PREFIX` | `string` | `"/skydns"` | etcd base path |
 | `--etcd.username` | `etcd.username` | `DOCKER_COREDNS_SYNC_ETCD_USERNAME` | `string` | `""` | Username for etcd authentication (requires `etcd.password`) |
@@ -136,93 +136,29 @@ Configuration values can be provided via:
 ## Multi-host Behavior & Record Garbage Collection
 
 Each instance scopes ownership of etcd records by its `app.hostname`. A host only
-removes records it owns — except for orphan cleanup described below.
+removes records it owns — except for the orphan cleanup described below.
 
-Every instance **announces itself** under a heartbeat prefix outside
-`etcd.path_prefix` (so CoreDNS never sees these keys):
+Every instance publishes a **lease-backed heartbeat** key under a prefix outside
+`etcd.path_prefix` (so CoreDNS never sees these keys) and keeps it alive while it
+runs. Heartbeating is always on. During reconciliation a host garbage-collects
+any record whose owner has **no live heartbeat** — this is how a permanently
+removed node is cleaned up: once its lease expires, peers reclaim its records
+automatically, no manual step required.
 
-- **Heartbeat enabled** (`app.heartbeat_ttl > 0`, the default): the instance
-  publishes a **lease-backed** key and keeps it alive. During reconciliation it
-  treats any record whose owner has *neither a live heartbeat nor an opt-out
-  marker* as an orphan and garbage-collects it. The lease TTL is the grace
-  period — an owner must be silent for longer than `heartbeat_ttl` before its
-  records become eligible for removal, so a brief outage or restart will **not**
-  cause another host to delete its records.
-- **Heartbeat disabled** (`app.heartbeat_ttl <= 0`): the instance writes a
-  **persistent opt-out marker** instead. It runs no cross-host GC itself, and
-  because the marker is present its records are **never** GC'd by peers.
+The lease TTL (`app.heartbeat_ttl`) is the grace period: an owner must be silent
+for longer than `heartbeat_ttl` before its records become eligible for removal,
+so a brief outage or restart will **not** cause another host to delete its
+records. To retire a host, just stop its daemon and wait one grace period.
 
-A host only ever runs cross-host GC while it is *itself* actively heartbeating.
-If it has heartbeats disabled, or it failed to register its own heartbeat (e.g.
-etcd was briefly unreachable at startup), it performs no GC that run — it never
-deletes a peer's records on the basis of liveness it cannot vouch for. The
-liveness lookup uses a linearizable etcd read, since it authorizes deletions.
+A host only ever runs cross-host GC while it is *itself* actively heartbeating —
+if it failed to register its own heartbeat (e.g. etcd was briefly unreachable at
+startup), it performs no GC that run and never deletes a peer's records on the
+basis of liveness it cannot vouch for. The liveness lookup uses a linearizable
+etcd read, since it authorizes deletions.
 
 > **Upgrading a multi-host fleet:** roll out this version to all hosts together. A host
-> running an older version publishes neither a heartbeat nor an opt-out marker, so it
-> will look "dead" to upgraded hosts, which would then GC its records.
-
-### Decommissioning a host
-
-When a host is retired permanently, remove it from the shared registry with the
-`decommission` subcommand. It deletes that host's heartbeat/opt-out marker **and**
-every DNS record it owns, so it works whether or not the host used heartbeats and
-whether or not any other host is around to garbage-collect.
-
-Run it with no argument to pick a host interactively — it lists the hosts that are
-eligible for removal and you choose one with the arrow keys. The machine you're
-running on is shown as `This host (<hostname>)`, and each entry notes its record
-count and heartbeat status (`active heartbeat`, `opt-out marker`, or `no
-heartbeat`):
-
-```bash
-docker-coredns-sync decommission
-```
-
-Or pass a hostname to skip the picker — **required** when there's no interactive
-terminal (containers, CI, scripts), where you should also pass `--yes` to skip
-the confirmation prompt:
-
-```bash
-docker-coredns-sync decommission <hostname> --yes
-```
-
-**Safety rules:**
-
-- A **foreign** host with an **active heartbeat** (its daemon is still running)
-  can't be decommissioned — it's filtered out of the interactive list, and naming
-  it explicitly is refused. Stop its daemon first. (A foreign host with only an
-  *opt-out* marker, or none, is fine; so is the local host.)
-- Decommissioning always asks for confirmation unless you pass `--yes` / `-y`.
-
-Run it **after** stopping the target host's daemon (a running daemon would just
-re-publish its marker and records). It can be run from the host being removed or
-from **any** machine that can reach the same etcd cluster, and it is idempotent.
-
-It only needs the etcd connection settings, so the easiest way to run it from
-anywhere — including a throwaway container — is to mount the same config file the
-daemon uses:
-
-```bash
-docker run --rm \
-  -v /path/to/config.yaml:/config/config.yaml:ro \
-  ghcr.io/auto-dns/docker-coredns-sync:latest \
-  decommission old-node --yes
-```
-
-Or pass the etcd settings as flags instead of a config file (an `app.hostname`
-value is required by config validation but is irrelevant to this command):
-
-```bash
-docker run --rm ghcr.io/auto-dns/docker-coredns-sync:latest \
-  decommission old-node --yes \
-  --etcd-endpoints http://etcd:2379 \
-  --etcd.path-prefix /skydns \
-  --app.hostname cleanup
-```
-
-For an auth/TLS-protected etcd, add the same `--etcd.username` / `--etcd.password`
-/ `--etcd.tls.*` flags (or config keys) you use for the daemon.
+> running an older version doesn't publish a heartbeat, so it will look "dead" to
+> upgraded hosts, which would then GC its records.
 
 ---
 

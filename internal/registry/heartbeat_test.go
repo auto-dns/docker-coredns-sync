@@ -9,49 +9,6 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-func TestEtcdRegistry_StartHeartbeat_DisabledWritesStaticMarker(t *testing.T) {
-	mock := newMockEtcdClient()
-	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 0, testLogger())
-
-	if err := reg.StartHeartbeat(context.Background()); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// A disabled host publishes a persistent (unleased) opt-out marker: a Put
-	// with no Grant and no KeepAlive.
-	if mock.grantCalled {
-		t.Error("expected no lease grant when heartbeat is disabled")
-	}
-	if mock.keepAliveCalled {
-		t.Error("expected no keepalive when heartbeat is disabled")
-	}
-	if len(mock.putKeys) != 1 {
-		t.Fatalf("expected 1 put (the static marker), got %d", len(mock.putKeys))
-	}
-	wantKey := "/docker-coredns-sync/heartbeat/docker-host"
-	if mock.putKeys[0] != wantKey {
-		t.Errorf("expected marker key %q, got %q", wantKey, mock.putKeys[0])
-	}
-	if mock.putValues[0] != heartbeatStaticValue {
-		t.Errorf("expected marker value %q, got %q", heartbeatStaticValue, mock.putValues[0])
-	}
-	if reg.hbActive {
-		t.Error("expected hbActive to be false for a disabled host (it must not run GC)")
-	}
-}
-
-func TestEtcdRegistry_StartHeartbeat_DisabledMarkerPutError(t *testing.T) {
-	mock := newMockEtcdClient()
-	mock.putFunc = func(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error) {
-		return nil, errors.New("boom")
-	}
-	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 0, testLogger())
-
-	if err := reg.StartHeartbeat(context.Background()); err == nil {
-		t.Fatal("expected error when the static marker put fails")
-	}
-}
-
 func TestEtcdRegistry_StartHeartbeat_WritesLeasedKey(t *testing.T) {
 	mock := newMockEtcdClient()
 	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 30, testLogger())
@@ -166,19 +123,6 @@ func TestEtcdRegistry_GetLiveHostnames_NotActiveReturnsNil(t *testing.T) {
 	}
 	if live != nil {
 		t.Errorf("expected nil set when not actively heartbeating, got %v", live)
-	}
-}
-
-func TestEtcdRegistry_GetLiveHostnames_DisabledReturnsNil(t *testing.T) {
-	mock := newMockEtcdClient()
-	reg := NewEtcdRegistry(mock, testConfig(), "docker-host", 0, testLogger())
-
-	live, err := reg.GetLiveHostnames(context.Background())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if live != nil {
-		t.Errorf("expected nil set when heartbeat disabled, got %v", live)
 	}
 }
 

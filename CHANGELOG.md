@@ -46,29 +46,18 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `coredns.<kind>[.<alias>].ttl` label. `0` leaves the TTL unset so CoreDNS
   applies its own default. A TTL change is treated as record drift, so it
   self-heals on the next reconcile. (#14)
-- **Cross-host garbage collection of orphaned records.** Each host announces
-  itself under a heartbeat prefix outside `etcd.path_prefix`. With heartbeats
-  enabled (`app.heartbeat_ttl > 0`, default `30s`) it publishes a lease-backed
-  key and keeps it alive; reconciliation removes records whose owner has neither
-  a live heartbeat nor an opt-out marker, cleaning up after
-  permanently-decommissioned nodes. The lease TTL is the grace period, so
-  transient outages don't trigger premature deletion. A host with
-  `app.heartbeat_ttl <= 0` instead writes a **persistent opt-out marker**: it
-  runs no cross-host GC and its records are never GC'd by peers. A host runs GC
-  only while it is itself actively heartbeating (so a failed heartbeat
-  registration disables its GC rather than letting it act on liveness it can't
-  vouch for), and the liveness lookup uses a linearizable etcd read because it
-  authorizes deletions. (#13)
+- **Cross-host garbage collection of orphaned records.** Every host publishes a
+  lease-backed heartbeat key outside `etcd.path_prefix` and keeps it alive;
+  heartbeating is always on. Reconciliation removes records whose owner has no
+  live heartbeat, so a permanently removed node is cleaned up automatically once
+  its lease expires — no manual step. The lease TTL (`app.heartbeat_ttl`, default
+  `30s`, must be > 0) is the grace period, so transient outages don't trigger
+  premature deletion. A host runs GC only while it is itself actively
+  heartbeating (so a failed heartbeat registration disables its GC rather than
+  letting it act on liveness it can't vouch for), and the liveness lookup uses a
+  linearizable etcd read because it authorizes deletions. (#13)
 - **Prominent startup warning** when `app.host_ipv4`/`app.host_ipv6` is unset,
   making it obvious that value-less A/AAAA records will be skipped. (#16)
-- **`decommission` subcommand** to permanently remove a host from the shared
-  registry: it deletes the host's heartbeat/opt-out marker and every DNS record
-  it owns. Run with no argument to pick a host interactively (arrow keys; the
-  local host is shown as "This host (<hostname>)"), or pass a hostname to skip the
-  picker for containers/CI. Always asks for confirmation unless `--yes`/`-y` is
-  given. A foreign host with an active heartbeat (its daemon is still running)
-  can't be decommissioned. Idempotent, runnable from the host itself or any
-  machine that can reach etcd. (#13)
 
 ### Changed
 - The Docker event stream now reconnects automatically with bounded
@@ -88,11 +77,10 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Notes
 - When upgrading a multi-host fleet, roll out to all hosts together: a host
-  running an older version publishes neither a heartbeat nor an opt-out marker,
-  so it could be treated as dead by upgraded hosts and have its records GC'd.
-- A host that ran with `app.heartbeat_ttl <= 0` has its records exempt from
-  automatic GC by design; retire it with the `decommission <hostname>` subcommand
-  (it removes the host's records and opt-out marker).
+  running an older version doesn't publish a heartbeat, so it could be treated as
+  dead by upgraded hosts and have its records GC'd.
+- To retire a host, stop its daemon; its records are reclaimed automatically once
+  its heartbeat lease expires (after `app.heartbeat_ttl`).
 
 ## [0.6.1] - 2026-06-17
 

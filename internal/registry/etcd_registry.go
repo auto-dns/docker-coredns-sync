@@ -28,13 +28,6 @@ type registryMetrics interface {
 // never parses them as DNS records.
 const heartbeatPrefix = "/docker-coredns-sync/heartbeat"
 
-// heartbeatStaticValue marks a host that has opted out of leased heartbeats
-// (heartbeat_ttl <= 0). Its key is persistent (no lease): the host announces it
-// exists so peers never mistake it for a dead owner and GC its records, but it
-// does not itself participate in cross-host GC. Decommissioning such a host
-// requires manually deleting its records and this marker.
-const heartbeatStaticValue = "static"
-
 type EtcdRegistry struct {
 	client       etcdClient
 	cfg          *config.EtcdConfig
@@ -47,8 +40,8 @@ type EtcdRegistry struct {
 	hbLease  clientv3.LeaseID
 	hbCancel context.CancelFunc
 	// hbActive is true only while this host holds a live leased heartbeat. It
-	// gates cross-host GC: a host that is not actively heartbeating (disabled,
-	// or StartHeartbeat failed) must not garbage-collect any peer's records.
+	// gates cross-host GC: a host whose StartHeartbeat has not (yet) succeeded
+	// must not garbage-collect any peer's records.
 	hbActive bool
 }
 
@@ -84,28 +77,12 @@ func heartbeatKey(hostname string) string {
 	return fmt.Sprintf("%s/%s", heartbeatPrefix, hostname)
 }
 
-// StartHeartbeat announces this host's presence in etcd so peers never treat its
-// records as orphaned.
-//
-// When heartbeats are enabled (heartbeatTTL > 0) it publishes a lease-backed
-// liveness key and keeps the lease alive for the lifetime of ctx; only then does
-// this host participate in cross-host GC (see GetLiveHostnames). When disabled
-// (heartbeatTTL <= 0) it instead writes a persistent, unleased opt-out marker:
-// peers will never GC this host's records, and this host runs no GC itself.
+// StartHeartbeat publishes this host's lease-backed liveness key and keeps the
+// lease alive for the lifetime of ctx. Heartbeating is mandatory: a host only
+// participates in cross-host GC (see GetLiveHostnames) once this succeeds, and
+// peers treat a host whose lease has expired as gone and reclaim its records.
 func (er *EtcdRegistry) StartHeartbeat(ctx context.Context) error {
 	key := heartbeatKey(er.hostname)
-
-	if er.heartbeatTTL <= 0 {
-		// Persistent (unleased) marker: it outlives this process so a host that
-		// has deliberately opted out of heartbeats is never mistaken for a dead
-		// one. No keepalive, and hbActive stays false so we run no cross-host GC.
-		if _, err := er.client.Put(ctx, key, heartbeatStaticValue); err != nil {
-			er.incEtcdError()
-			return fmt.Errorf("put static heartbeat marker %q: %w", key, err)
-		}
-		er.logger.Info().Str("key", key).Msg("heartbeat disabled (heartbeat_ttl <= 0); published persistent opt-out marker; this host runs no cross-host GC and its records are exempt from GC by peers")
-		return nil
-	}
 
 	leaseResp, err := er.client.Grant(ctx, int64(er.heartbeatTTL))
 	if err != nil {
@@ -155,9 +132,9 @@ func (er *EtcdRegistry) stopHeartbeat() {
 	er.hbActive = false
 	er.hbMu.Unlock()
 
-	// Only a leased heartbeat is torn down here. A disabled host's persistent
-	// opt-out marker is intentionally left in place so its records stay exempt
-	// across restarts.
+	// Nothing to tear down if a heartbeat was never started (e.g. StartHeartbeat
+	// failed). On a clean shutdown the key is removed and the lease revoked so
+	// peers notice the host is gone promptly rather than waiting out the TTL.
 	if cancel == nil {
 		return
 	}
@@ -173,14 +150,13 @@ func (er *EtcdRegistry) stopHeartbeat() {
 	}
 }
 
-// GetLiveHostnames returns the set of hostnames whose records must not be
-// garbage-collected: every host that has announced itself under the heartbeat
-// prefix — both live leased heartbeats and persistent opt-out markers.
+// GetLiveHostnames returns the set of hostnames with a live heartbeat key —
+// the hosts whose records must not be garbage-collected.
 //
 // It returns (nil, nil) unless this host is itself actively heartbeating, which
 // callers must treat as "cross-host GC disabled" — never as "every host is
-// dead". This guarantees a host that has disabled heartbeats, or whose
-// StartHeartbeat failed, never reaps a peer's records.
+// dead". This guarantees a host whose StartHeartbeat failed never reaps a peer's
+// records.
 //
 // The read is linearizable (no WithSerializable): it authorizes deletions, so a
 // stale read from a lagging member that omitted a live host could otherwise
@@ -211,146 +187,6 @@ func (er *EtcdRegistry) GetLiveHostnames(ctx context.Context) (map[string]struct
 	// This host is always considered live while it is reconciling.
 	live[er.hostname] = struct{}{}
 	return live, nil
-}
-
-// HostSummary describes a host known to the registry, for listing/selection.
-type HostSummary struct {
-	Hostname    string
-	RecordCount int  // number of DNS records owned by the host
-	HasMarker   bool // whether the host has any heartbeat/opt-out marker present
-	// ActiveHeartbeat is true when the marker is a live leased heartbeat (the
-	// host's daemon is running), as opposed to a persistent opt-out marker.
-	ActiveHeartbeat bool
-}
-
-// ListHosts returns every host known to the registry — the union of hosts with a
-// heartbeat/opt-out marker and hosts that own at least one DNS record — sorted by
-// hostname. It is used to present a selection of hosts to decommission.
-func (er *EtcdRegistry) ListHosts(ctx context.Context) ([]HostSummary, error) {
-	summaries := map[string]*HostSummary{}
-	get := func(host string) *HostSummary {
-		s := summaries[host]
-		if s == nil {
-			s = &HostSummary{Hostname: host}
-			summaries[host] = s
-		}
-		return s
-	}
-
-	base := heartbeatPrefix
-	// Values are needed (not WithKeysOnly) to tell a live leased heartbeat
-	// (value = hostname) from a persistent opt-out marker (value = "static").
-	hbResp, err := er.client.Get(ctx, base+"/", clientv3.WithPrefix())
-	if err != nil {
-		er.incEtcdError()
-		return nil, fmt.Errorf("list heartbeat keys under %q: %w", base, err)
-	}
-	for _, kv := range hbResp.Kvs {
-		host := strings.TrimPrefix(string(kv.Key), base+"/")
-		if host == "" {
-			continue
-		}
-		s := get(host)
-		s.HasMarker = true
-		// Treat anything that isn't the explicit opt-out sentinel as a live
-		// heartbeat — conservative, so an unexpected value blocks deletion.
-		if string(kv.Value) != heartbeatStaticValue {
-			s.ActiveHeartbeat = true
-		}
-	}
-
-	recResp, err := er.client.Get(ctx, er.cfg.PathPrefix, clientv3.WithPrefix())
-	if err != nil {
-		er.incEtcdError()
-		return nil, fmt.Errorf("list under prefix %q: %w", er.cfg.PathPrefix, err)
-	}
-	for _, kv := range recResp.Kvs {
-		var wire etcdRecord
-		if err := json.Unmarshal(kv.Value, &wire); err != nil {
-			er.logger.Warn().Err(err).Str("key", string(kv.Key)).Msg("list hosts: skipping unparseable record")
-			continue
-		}
-		if wire.OwnerHostname == "" {
-			continue
-		}
-		get(wire.OwnerHostname).RecordCount++
-	}
-
-	out := make([]HostSummary, 0, len(summaries))
-	for _, s := range summaries {
-		out = append(out, *s)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Hostname < out[j].Hostname })
-	return out, nil
-}
-
-// DecommissionHost permanently removes a host from the shared registry: it
-// deletes the host's heartbeat/opt-out marker and every DNS record it owns. It
-// is safe to run from any machine that can reach etcd (including a throwaway
-// container) and is idempotent. It returns the number of DNS records deleted.
-//
-// Run it only after the target host's daemon has stopped; otherwise a still-
-// running daemon will simply re-publish its marker and records on the next tick.
-func (er *EtcdRegistry) DecommissionHost(ctx context.Context, hostname string) (int, error) {
-	// 1. Drop the heartbeat/opt-out marker so peers stop treating the host as
-	//    present (and so a disabled host's records lose their GC exemption).
-	hbKey := heartbeatKey(hostname)
-	if _, err := er.client.Delete(ctx, hbKey); err != nil {
-		er.incEtcdError()
-		return 0, fmt.Errorf("delete heartbeat marker %q: %w", hbKey, err)
-	}
-
-	// 2. Delete every DNS record owned by the host under the configured prefix.
-	prefix := er.cfg.PathPrefix
-	resp, err := er.client.Get(ctx, prefix, clientv3.WithPrefix())
-	if err != nil {
-		er.incEtcdError()
-		return 0, fmt.Errorf("list under prefix %q: %w", prefix, err)
-	}
-
-	toDelete := make([]string, 0)
-	for _, kv := range resp.Kvs {
-		var wire etcdRecord
-		if err := json.Unmarshal(kv.Value, &wire); err != nil {
-			er.logger.Warn().Err(err).Str("key", string(kv.Key)).Msg("decommission: skipping unparseable record")
-			continue
-		}
-		if wire.OwnerHostname == hostname {
-			toDelete = append(toDelete, string(kv.Key))
-		}
-	}
-
-	deleted, err := er.deleteKeys(ctx, toDelete)
-	er.logger.Info().Str("hostname", hostname).Int("records_deleted", deleted).Msg("decommissioned host")
-	return deleted, err
-}
-
-// deleteKeys deletes the given keys in bounded batches, returning the number
-// successfully deleted and the first error encountered (it keeps going on error).
-func (er *EtcdRegistry) deleteKeys(ctx context.Context, keys []string) (int, error) {
-	const batchSize = 64
-	var firstErr error
-	deleted := 0
-	for i := 0; i < len(keys); i += batchSize {
-		end := i + batchSize
-		if end > len(keys) {
-			end = len(keys)
-		}
-		batch := keys[i:end]
-		ops := make([]clientv3.Op, 0, len(batch))
-		for _, k := range batch {
-			ops = append(ops, clientv3.OpDelete(k))
-		}
-		if _, err := er.client.Txn(ctx).Then(ops...).Commit(); err != nil {
-			er.incEtcdError()
-			if firstErr == nil {
-				firstErr = fmt.Errorf("batch delete [%d:%d]: %w", i, end, err)
-			}
-			continue
-		}
-		deleted += len(batch)
-	}
-	return deleted, firstErr
 }
 
 // getNextIndexedKey generates a new etcd key for a record based on its fully qualified domain name (fqdn).
