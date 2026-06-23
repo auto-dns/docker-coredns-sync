@@ -75,6 +75,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   container must be absent for two consecutive resyncs) so a container that is
   only transiently missing from a single snapshot is not removed. (#8)
 
+### Documentation
+- Documented Docker label case-sensitivity rules in the README: the prefix,
+  field names (`name`/`value`/`force`/`ttl`), and aliases are case-sensitive
+  (a wrong-case segment is silently ignored), while record kinds and boolean
+  values are case-insensitive. Fixed stale config-reference defaults: `app.hostname`
+  is `""` and required (not `"your-hostname"`), and the non-existent `app.host_ip`
+  / `127.0.0.1` entry is replaced with the real `app.host_ipv4` / `app.host_ipv6`
+  keys (both default `""`). Also corrected the AAAA label example, which had been
+  copy-pasted from the A record. (#17)
+
 ### Notes
 - When upgrading a multi-host fleet, roll out to all hosts together: a host
   running an older version doesn't publish a heartbeat, so it could be treated as
