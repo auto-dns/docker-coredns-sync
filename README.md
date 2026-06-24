@@ -35,8 +35,8 @@
 - `coredns.a.value=192.168.1.123` *(optional, defaults to `host_ipv4`)*
 
 ### AAAA Record
-- `coredns.a.name=foo.example.com`
-- `coredns.a.value=fd20:0:1::123` *(optional, defaults to `host_ipv6`)*
+- `coredns.aaaa.name=foo.example.com`
+- `coredns.aaaa.value=fd20:0:1::123` *(optional, defaults to `host_ipv6`)*
 
 ### CNAME Record
 
@@ -64,6 +64,20 @@ coredns.cname.app.value=target.example.com
   `coredns.a.proxy.ttl=60`). A non-numeric value is ignored. When neither a
   label nor `app.record_ttl` sets a TTL, the field is omitted and CoreDNS
   applies its own default.
+
+### Case sensitivity
+
+Label parsing treats each segment of a label key differently, and getting the
+case wrong on a case-sensitive segment causes the label to be **silently
+ignored** rather than reported as an error:
+
+| Segment | Example | Case-sensitive? | Notes |
+|---------|---------|-----------------|-------|
+| Prefix | `coredns` in `coredns.a.name` | **Yes** | Must match `app.docker_label_prefix` exactly. `Coredns.a.name` is not recognized. |
+| Record kind | `a` / `aaaa` / `cname` | No | Normalized case-insensitively, so `coredns.A.name` and `coredns.a.name` are equivalent. |
+| Field | `name` / `value` / `force` / `ttl` | **Yes** | Must be lowercase. `coredns.a.Name` is silently ignored. |
+| Alias | `proxy` in `coredns.a.proxy.name` | **Yes** | Used verbatim; the alias only groups a record's fields together and is not otherwise interpreted. |
+| Boolean values | `true` for `coredns.enabled` / `coredns.force` | No | `true`, `True`, and `TRUE` are all accepted. |
 
 ---
 
@@ -106,8 +120,9 @@ Configuration values can be provided via:
 |------|------------|---------|------|---------|-------------|
 | `--app.allowed-record-types` | `app.allowed_record_types` | `DOCKER_COREDNS_SYNC_APP_ALLOWED_RECORD_TYPES` | `[]string` | `["A", "CNAME"]` | DNS record types to allow |
 | `--app.docker-label-prefix` | `app.docker_label_prefix` | `DOCKER_COREDNS_SYNC_APP_DOCKER_LABEL_PREFIX` | `string` | `"coredns"` | Docker label namespace |
-| `--app.host-ip` | `app.host_ip` | `DOCKER_COREDNS_SYNC_APP_HOST_IP` | `string` | `"127.0.0.1"` | IP to use for A records |
-| `--app.hostname` | `app.hostname` | `DOCKER_COREDNS_SYNC_APP_HOSTNAME` | `string` | `"your-hostname"` | Unique logical hostname for this node |
+| `--app.host-ipv4` | `app.host_ipv4` | `DOCKER_COREDNS_SYNC_APP_HOST_IPV4` | `string` | `""` | Default IPv4 address for value-less A records. When empty, A records without an explicit value are skipped |
+| `--app.host-ipv6` | `app.host_ipv6` | `DOCKER_COREDNS_SYNC_APP_HOST_IPV6` | `string` | `""` | Default IPv6 address for value-less AAAA records. When empty, AAAA records without an explicit value are skipped |
+| `--app.hostname` | `app.hostname` | `DOCKER_COREDNS_SYNC_APP_HOSTNAME` | `string` | `""` | Unique logical hostname for this node. **Required** — startup fails if empty |
 | `--app.poll-interval` | `app.poll_interval` | `DOCKER_COREDNS_SYNC_APP_POLL_INTERVAL` | `int` | `5` | How often to reconcile the registry (in seconds) |
 | `--app.dry-run` | `app.dry_run` | `DOCKER_COREDNS_SYNC_APP_DRY_RUN` | `bool` | `false` | Log planned etcd changes without applying them |
 | `--app.record-ttl` | `app.record_ttl` | `DOCKER_COREDNS_SYNC_APP_RECORD_TTL` | `uint` | `0` | Default DNS record TTL in seconds (`0` = unset; CoreDNS uses its own default). Overridable per record via a `coredns.<kind>[.<alias>].ttl` label |
