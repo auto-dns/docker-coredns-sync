@@ -130,7 +130,7 @@ Configuration values can be provided via:
 | *(config file only)* | `etcd.endpoints` | `DOCKER_COREDNS_SYNC_ETCD_ENDPOINTS` | `[]string` | `["http://localhost:2379"]` | etcd endpoint URLs (supports multiple for cluster) |
 | `--etcd.path-prefix` | `etcd.path_prefix` | `DOCKER_COREDNS_SYNC_ETCD_PATH_PREFIX` | `string` | `"/skydns"` | etcd base path |
 | `--etcd.username` | `etcd.username` | `DOCKER_COREDNS_SYNC_ETCD_USERNAME` | `string` | `""` | Username for etcd authentication (requires `etcd.password`) |
-| `--etcd.password` | `etcd.password` | `DOCKER_COREDNS_SYNC_ETCD_PASSWORD` | `string` | `""` | Password for etcd authentication |
+| *(config/env only)* | `etcd.password` | `DOCKER_COREDNS_SYNC_ETCD_PASSWORD` | `string` | `""` | Password for etcd authentication. Intentionally has no CLI flag — a password on the command line is exposed in the process list and shell history; use the env var or config file |
 | `--etcd.tls.ca-file` | `etcd.tls.ca_file` | `DOCKER_COREDNS_SYNC_ETCD_TLS_CA_FILE` | `string` | `""` | CA certificate (PEM) used to verify the etcd server |
 | `--etcd.tls.cert-file` | `etcd.tls.cert_file` | `DOCKER_COREDNS_SYNC_ETCD_TLS_CERT_FILE` | `string` | `""` | Client certificate (PEM) for mutual TLS (requires `key_file`) |
 | `--etcd.tls.key-file` | `etcd.tls.key_file` | `DOCKER_COREDNS_SYNC_ETCD_TLS_KEY_FILE` | `string` | `""` | Client private key (PEM) for mutual TLS (requires `cert_file`) |

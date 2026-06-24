@@ -64,3 +64,16 @@ func TestStatus_RecordReconcile_ErrorDoesNotRefresh(t *testing.T) {
 		t.Error("expected not ready after a failed reconcile with no prior success")
 	}
 }
+
+func TestStatus_Ready_FailedReconcileAfterSuccessIsNotReady(t *testing.T) {
+	s := NewStatus(time.Minute)
+	s.SetDockerConnected(true)
+	s.RecordReconcile(nil) // healthy
+	if ready, reason := s.Ready(); !ready {
+		t.Fatalf("expected ready after a successful reconcile, got not ready: %s", reason)
+	}
+	s.RecordReconcile(errors.New("etcd write failed")) // subsequent failure
+	if ready, _ := s.Ready(); ready {
+		t.Error("expected not ready immediately after a reconcile failure, even within the staleness window")
+	}
+}

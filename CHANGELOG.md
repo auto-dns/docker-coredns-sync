@@ -17,7 +17,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 >   These tags point at pre-migration commits that are **not reachable from the
 >   current `main`**.
 
-## [Unreleased]
+## [0.7.0] - 2026-06-24
 
 ### Added
 - `CONTRIBUTING.md` documenting versioning, branch, tag/release, issue, and
@@ -26,8 +26,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - etcd authentication and TLS (`etcd.username`, `etcd.password`, and an
   `etcd.tls` block with `ca_file`, `cert_file`, `key_file`,
   `insecure_skip_verify`), enabling connections to auth- and/or TLS-protected
-  etcd, including mutual TLS. Misconfiguration (a username without a password, a
-  cert without its key, an unreadable CA) fails fast at startup. (#11)
+  etcd, including mutual TLS. Misconfiguration fails fast at startup: a username
+  without a password (or a password without a username), a cert without its key,
+  an unreadable CA, or a TLS block configured while no endpoint uses `https://`
+  (so the settings would be silently ignored). `etcd.password` intentionally has
+  no CLI flag — set it via the env var or config file so it is never exposed in
+  the process list. (#11)
 - Prometheus metrics endpoint (`metrics.enabled`): exposes `/metrics` on the
   shared HTTP server with reconcile duration/last-success/result, records
   added/removed/skipped, etcd op/lock-failure counters, and Docker-disconnect
@@ -42,7 +46,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`docker.event_buffer_size`, `docker.reconnect_initial_backoff`,
   `docker.reconnect_max_backoff`). (#8)
 - **Per-record TTL control.** Records can now carry a TTL: set a global default
-  with `app.record_ttl` (seconds) or override per record with a
+  with `app.record_ttl` (`--app.record-ttl`, seconds) or override per record with a
   `coredns.<kind>[.<alias>].ttl` label. `0` leaves the TTL unset so CoreDNS
   applies its own default. A TTL change is treated as record drift, so it
   self-heals on the next reconcile. (#14)
@@ -50,12 +54,16 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   lease-backed heartbeat key outside `etcd.path_prefix` and keeps it alive;
   heartbeating is always on. Reconciliation removes records whose owner has no
   live heartbeat, so a permanently removed node is cleaned up automatically once
-  its lease expires — no manual step. The lease TTL (`app.heartbeat_ttl`, default
-  `30s`, must be > 0) is the grace period, so transient outages don't trigger
+  its lease expires — no manual step. The lease TTL (`app.heartbeat_ttl` /
+  `--app.heartbeat-ttl`, default `30s`, must be > 0) is the grace period, so transient outages don't trigger
   premature deletion. A host runs GC only while it is itself actively
   heartbeating (so a failed heartbeat registration disables its GC rather than
   letting it act on liveness it can't vouch for), and the liveness lookup uses a
-  linearizable etcd read because it authorizes deletions. (#13)
+  linearizable etcd read because it authorizes deletions. If the lease is later
+  lost (e.g. an etcd outage longer than the TTL), the host disables its own GC
+  and re-establishes the lease with backoff, so liveness self-heals without a
+  restart. The reserved heartbeat key prefix is validated not to overlap
+  `etcd.path_prefix`. Dry-run does not heartbeat (it makes no etcd writes). (#13)
 - **Prominent startup warning** when `app.host_ipv4`/`app.host_ipv6` is unset,
   making it obvious that value-less A/AAAA records will be skipped. (#16)
 
@@ -85,12 +93,46 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   keys (both default `""`). Also corrected the AAAA label example, which had been
   copy-pasted from the A record. (#17)
 
-### Notes
-- When upgrading a multi-host fleet, roll out to all hosts together: a host
-  running an older version doesn't publish a heartbeat, so it could be treated as
-  dead by upgraded hosts and have its records GC'd.
-- To retire a host, stop its daemon; its records are reclaimed automatically once
-  its heartbeat lease expires (after `app.heartbeat_ttl`).
+### Fixed
+- A clean, signal-driven shutdown now exits with status 0 instead of 1
+  (`context.Canceled` is treated as a normal stop), so process supervisors no
+  longer see a graceful stop as a crash.
+- The etcd client is now closed exactly once on shutdown (previously both the
+  engine and the app closed it).
+- The in-memory container map no longer grows without bound: stopped and pruned
+  containers are deleted rather than retained in a removed state.
+- Readiness now reports not-ready immediately after a failed reconciliation pass
+  (not only once the last success ages out), and the auxiliary HTTP server sets
+  write and idle timeouts in addition to the read-header timeout.
+
+### Upgrade guide (0.6.x → 0.7.0)
+
+This release introduces always-on, lease-backed heartbeats and automatic
+cross-host garbage collection of orphaned records. No configuration keys were
+renamed or removed and every new setting has a default, so existing config files
+and environment variables keep working unchanged — but the new GC behavior means
+a few steps are required:
+
+1. **Upgrade all hosts together.** A host running an older version does not
+   publish a heartbeat, so upgraded hosts treat it as dead and garbage-collect
+   its records. Roll the whole fleet in a single window rather than host-by-host;
+   do not run 0.6.x and 0.7.0 against the same etcd for an extended period.
+2. **Make sure `etcd.path_prefix` does not overlap the heartbeat keyspace.**
+   Heartbeats are written under the reserved prefix
+   `/docker-coredns-sync/heartbeat`, deliberately outside `etcd.path_prefix`.
+   Startup now **fails fast** if the two overlap. The default (`/skydns`) is
+   unaffected — only a custom prefix that collides needs changing. If you run
+   etcd with authentication/RBAC, grant the daemon read/write access to this
+   reserved keyspace in addition to `etcd.path_prefix`.
+3. **Expect orphaned records to be reclaimed automatically.** Once every host is
+   upgraded, records owned by a host that is gone are removed after its heartbeat
+   lease expires. To retire a host, simply stop its daemon — no manual etcd
+   cleanup is needed. Tune the grace period with `app.heartbeat_ttl`
+   (`--app.heartbeat-ttl`, default `30s`, must be > 0); transient outages shorter
+   than this do not trigger deletion.
+
+Downgrading is safe: a 0.6.x binary ignores the heartbeat keys, which expire on
+their own via their lease.
 
 ## [0.6.1] - 2026-06-17
 

@@ -114,7 +114,6 @@ type mockRegistry struct {
 	listFunc             func(ctx context.Context) ([]*domain.RecordIntent, error)
 	registerFunc         func(ctx context.Context, record *domain.RecordIntent) error
 	removeFunc           func(ctx context.Context, record *domain.RecordIntent) error
-	closeFunc            func() error
 
 	startHeartbeatCalled   bool
 	getLiveHostnamesCalled bool
@@ -122,7 +121,7 @@ type mockRegistry struct {
 	listCalled             bool
 	registerCalled         bool
 	removeCalled           bool
-	closeCalled            bool
+	stopHeartbeatCalled    bool
 
 	registeredRecords []*domain.RecordIntent
 	removedRecords    []*domain.RecordIntent
@@ -196,15 +195,10 @@ func (m *mockRegistry) Remove(ctx context.Context, record *domain.RecordIntent) 
 	return nil
 }
 
-func (m *mockRegistry) Close() error {
+func (m *mockRegistry) StopHeartbeat() {
 	m.mu.Lock()
-	m.closeCalled = true
+	m.stopHeartbeatCalled = true
 	m.mu.Unlock()
-
-	if m.closeFunc != nil {
-		return m.closeFunc()
-	}
-	return nil
 }
 
 func (m *mockRegistry) WasRegisterCalled() bool {
@@ -231,10 +225,10 @@ func (m *mockRegistry) WasLockTransactionCalled() bool {
 	return m.lockTransactionCalled
 }
 
-func (m *mockRegistry) WasCloseCalled() bool {
+func (m *mockRegistry) WasStopHeartbeatCalled() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.closeCalled
+	return m.stopHeartbeatCalled
 }
 
 func (m *mockRegistry) GetRegisteredRecords() []*domain.RecordIntent {

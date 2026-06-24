@@ -25,8 +25,9 @@ type registryMetrics interface {
 
 // heartbeatPrefix is where per-host liveness keys live. It is deliberately
 // outside the SkyDNS path_prefix so CoreDNS never sees these keys and List()
-// never parses them as DNS records.
-const heartbeatPrefix = "/docker-coredns-sync/heartbeat"
+// never parses them as DNS records. Config validation enforces that path_prefix
+// does not overlap it.
+const heartbeatPrefix = config.HeartbeatKeyPrefix
 
 type EtcdRegistry struct {
 	client       etcdClient
@@ -84,42 +85,119 @@ func heartbeatKey(hostname string) string {
 func (er *EtcdRegistry) StartHeartbeat(ctx context.Context) error {
 	key := heartbeatKey(er.hostname)
 
-	leaseResp, err := er.client.Grant(ctx, int64(er.heartbeatTTL))
-	if err != nil {
-		er.incEtcdError()
-		return fmt.Errorf("grant heartbeat lease: %w", err)
-	}
-
-	if _, err := er.client.Put(ctx, key, er.hostname, clientv3.WithLease(leaseResp.ID)); err != nil {
-		er.incEtcdError()
-		_, _ = er.client.Revoke(ctx, leaseResp.ID)
-		return fmt.Errorf("put heartbeat key %q: %w", key, err)
-	}
-
 	kaCtx, cancel := context.WithCancel(ctx)
-	kaCh, err := er.client.KeepAlive(kaCtx, leaseResp.ID)
+	kaCh, leaseID, err := er.grantAndKeepAlive(kaCtx, key)
 	if err != nil {
 		er.incEtcdError()
 		cancel()
-		_, _ = er.client.Delete(ctx, key)
-		_, _ = er.client.Revoke(ctx, leaseResp.ID)
-		return fmt.Errorf("keepalive heartbeat lease: %w", err)
+		return err
 	}
 
 	er.hbMu.Lock()
-	er.hbLease = leaseResp.ID
+	er.hbLease = leaseID
 	er.hbCancel = cancel
 	er.hbActive = true
 	er.hbMu.Unlock()
 
-	// Drain keepalive responses until cancel; presence keeps the lease alive.
-	go func() {
-		for range kaCh {
-		}
-	}()
+	// Maintain the lease for the lifetime of kaCtx, re-establishing it if it is
+	// lost, so cross-host GC self-heals after a transient etcd outage.
+	go er.maintainHeartbeat(kaCtx, key, kaCh)
 
 	er.logger.Info().Str("key", key).Int("ttl", er.heartbeatTTL).Msg("heartbeat started")
 	return nil
+}
+
+// grantAndKeepAlive grants a fresh lease, publishes the liveness key under it,
+// and starts keepalive. On any error it best-effort cleans up the partial state
+// and returns the error.
+func (er *EtcdRegistry) grantAndKeepAlive(ctx context.Context, key string) (<-chan *clientv3.LeaseKeepAliveResponse, clientv3.LeaseID, error) {
+	leaseResp, err := er.client.Grant(ctx, int64(er.heartbeatTTL))
+	if err != nil {
+		return nil, 0, fmt.Errorf("grant heartbeat lease: %w", err)
+	}
+	if _, err := er.client.Put(ctx, key, er.hostname, clientv3.WithLease(leaseResp.ID)); err != nil {
+		er.bestEffortCleanup(leaseResp.ID, key)
+		return nil, 0, fmt.Errorf("put heartbeat key %q: %w", key, err)
+	}
+	kaCh, err := er.client.KeepAlive(ctx, leaseResp.ID)
+	if err != nil {
+		er.bestEffortCleanup(leaseResp.ID, key)
+		return nil, 0, fmt.Errorf("keepalive heartbeat lease: %w", err)
+	}
+	return kaCh, leaseResp.ID, nil
+}
+
+// maintainHeartbeat drains keepalive responses to keep the lease alive. When the
+// keepalive channel closes while the host is still meant to be heartbeating
+// (kaCtx not cancelled), the lease has been lost — most often because an etcd
+// outage exceeded the lease TTL. It then marks the host inactive (disabling
+// cross-host GC, since the host can no longer vouch for its own liveness) and
+// re-establishes a fresh lease before resuming.
+func (er *EtcdRegistry) maintainHeartbeat(kaCtx context.Context, key string, kaCh <-chan *clientv3.LeaseKeepAliveResponse) {
+	for {
+		for range kaCh {
+		}
+		// Channel closed. A cancelled kaCtx means a deliberate shutdown.
+		if kaCtx.Err() != nil {
+			return
+		}
+		er.hbMu.Lock()
+		er.hbActive = false
+		er.hbMu.Unlock()
+		er.logger.Warn().Str("key", key).Msg("heartbeat lease lost; cross-host GC disabled until re-established")
+
+		newCh, ok := er.reestablishHeartbeat(kaCtx, key)
+		if !ok {
+			return // kaCtx cancelled while retrying
+		}
+		kaCh = newCh
+	}
+}
+
+// reestablishHeartbeat re-grants the lease, re-publishes the liveness key, and
+// restarts keepalive, retrying with bounded backoff until it succeeds or kaCtx
+// is cancelled. On success it records the new lease and re-activates GC.
+func (er *EtcdRegistry) reestablishHeartbeat(kaCtx context.Context, key string) (<-chan *clientv3.LeaseKeepAliveResponse, bool) {
+	const (
+		initialBackoff = 1 * time.Second
+		maxBackoff     = 30 * time.Second
+	)
+	backoff := initialBackoff
+	for {
+		if kaCtx.Err() != nil {
+			return nil, false
+		}
+		kaCh, leaseID, err := er.grantAndKeepAlive(kaCtx, key)
+		if err == nil {
+			er.hbMu.Lock()
+			er.hbLease = leaseID
+			er.hbActive = true
+			er.hbMu.Unlock()
+			er.logger.Info().Str("key", key).Msg("heartbeat re-established")
+			return kaCh, true
+		}
+		er.incEtcdError()
+		er.logger.Warn().Err(err).Dur("retry_in", backoff).Msg("failed to re-establish heartbeat; retrying")
+		select {
+		case <-kaCtx.Done():
+			return nil, false
+		case <-time.After(backoff):
+		}
+		if backoff < maxBackoff {
+			if backoff *= 2; backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+}
+
+// bestEffortCleanup removes a partially-created heartbeat key/lease using a
+// short background context so it runs even when the caller's context is done.
+func (er *EtcdRegistry) bestEffortCleanup(lease clientv3.LeaseID, key string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _ = er.client.Delete(ctx, key)
+	_, _ = er.client.Revoke(ctx, lease)
 }
 
 // stopHeartbeat cancels the keepalive and best-effort removes the liveness key.
@@ -430,6 +508,14 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 		}
 	}
 	return err
+}
+
+// StopHeartbeat tears down this host's heartbeat (cancels keepalive, removes the
+// liveness key, and revokes the lease) without closing the underlying etcd
+// client, whose lifecycle is owned by the caller (the App). Safe to call when no
+// heartbeat was started.
+func (er *EtcdRegistry) StopHeartbeat() {
+	er.stopHeartbeat()
 }
 
 func (er *EtcdRegistry) Close() error {

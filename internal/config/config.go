@@ -22,6 +22,12 @@ type Config struct {
 	Docker  DockerConfig  `mapstructure:"docker"`
 }
 
+// HeartbeatKeyPrefix is the etcd key prefix under which per-host liveness
+// (heartbeat) keys are written. It lives deliberately outside etcd.path_prefix
+// so CoreDNS never serves these keys and record listing never parses them;
+// validate() enforces that the two prefixes do not overlap.
+const HeartbeatKeyPrefix = "/docker-coredns-sync/heartbeat"
+
 // DockerConfig configures the Docker event subscription, including the
 // reconnect behavior when the event stream drops.
 type DockerConfig struct {
@@ -270,14 +276,27 @@ func (c *Config) validate() error {
 	if c.Etcd.PathPrefix == "" {
 		return fmt.Errorf("etcd.path_prefix cannot be empty")
 	}
+	// The heartbeat keys must not fall under path_prefix (or vice versa), or
+	// CoreDNS would try to serve them and List() would parse them as DNS records.
+	if pp := strings.TrimSuffix(c.Etcd.PathPrefix, "/"); pp == "" ||
+		strings.HasPrefix(HeartbeatKeyPrefix+"/", pp+"/") ||
+		strings.HasPrefix(pp+"/", HeartbeatKeyPrefix+"/") {
+		return fmt.Errorf("etcd.path_prefix %q overlaps the reserved heartbeat key prefix %q; choose a non-overlapping prefix", c.Etcd.PathPrefix, HeartbeatKeyPrefix)
+	}
 	if (c.Etcd.TLS.CertFile == "") != (c.Etcd.TLS.KeyFile == "") {
 		return fmt.Errorf("etcd.tls.cert_file and etcd.tls.key_file must be provided together")
 	}
 	if c.Etcd.TLS.InsecureSkipVerify && c.Etcd.TLS.CAFile != "" {
 		return fmt.Errorf("etcd.tls.insecure_skip_verify cannot be combined with etcd.tls.ca_file: the CA would be ignored, giving a false sense of verification")
 	}
+	if c.Etcd.TLS.Configured() && !c.Etcd.hasHTTPSEndpoint() {
+		return fmt.Errorf("etcd.tls.* is configured but no etcd.endpoints uses https://; the TLS settings would be silently ignored")
+	}
 	if c.Etcd.Username != "" && c.Etcd.Password == "" {
 		return fmt.Errorf("etcd.password must be set when etcd.username is provided")
+	}
+	if c.Etcd.Password != "" && c.Etcd.Username == "" {
+		return fmt.Errorf("etcd.username must be set when etcd.password is provided")
 	}
 	if c.Etcd.LockTTL <= 0 {
 		return fmt.Errorf("etcd.lock_ttl must be > 0")
