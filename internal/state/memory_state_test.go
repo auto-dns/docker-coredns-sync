@@ -79,6 +79,75 @@ func TestMemoryState_MarkRemoved_Exists(t *testing.T) {
 	}
 }
 
+func TestMemoryState_RetainRunning_DebouncedPrune(t *testing.T) {
+	state := NewMemoryState()
+	state.Upsert("keep", "keep-app", time.Now(), []*domain.RecordIntent{
+		makeTestIntent("keep.example.com", "192.168.1.1"),
+	}, "running")
+	state.Upsert("drop", "drop-app", time.Now(), []*domain.RecordIntent{
+		makeTestIntent("drop.example.com", "192.168.1.2"),
+	}, "running")
+
+	running := map[string]struct{}{"keep": {}}
+
+	// First resync with "drop" absent: debounced, not yet pruned.
+	if removed := state.RetainRunning(running); removed != 0 {
+		t.Errorf("expected 0 pruned on first absence (debounced), got %d", removed)
+	}
+	if len(state.GetAllDesiredRecordIntents()) != 2 {
+		t.Errorf("expected both containers still present after first absence")
+	}
+
+	// Second consecutive absence: now pruned.
+	if removed := state.RetainRunning(running); removed != 1 {
+		t.Errorf("expected 1 pruned on second consecutive absence, got %d", removed)
+	}
+
+	result := state.GetAllDesiredRecordIntents()
+	if len(result) != 1 {
+		t.Fatalf("expected 1 desired intent after prune, got %d", len(result))
+	}
+	if result[0].Record.Name != "keep.example.com" {
+		t.Errorf("expected the kept container's record, got %q", result[0].Record.Name)
+	}
+}
+
+func TestMemoryState_RetainRunning_TransientAbsenceNotPruned(t *testing.T) {
+	state := NewMemoryState()
+	state.Upsert("c", "app", time.Now(), []*domain.RecordIntent{
+		makeTestIntent("app.example.com", "192.168.1.1"),
+	}, "running")
+
+	// Absent once...
+	if removed := state.RetainRunning(map[string]struct{}{}); removed != 0 {
+		t.Errorf("expected 0 pruned on first absence, got %d", removed)
+	}
+	// ...then present again: the miss counter must reset.
+	if removed := state.RetainRunning(map[string]struct{}{"c": {}}); removed != 0 {
+		t.Errorf("expected 0 pruned when present again, got %d", removed)
+	}
+	// Absent once more: still only one consecutive miss, not pruned.
+	if removed := state.RetainRunning(map[string]struct{}{}); removed != 0 {
+		t.Errorf("expected 0 pruned after counter reset, got %d", removed)
+	}
+	if len(state.GetAllDesiredRecordIntents()) != 1 {
+		t.Errorf("expected container to survive transient absences")
+	}
+}
+
+func TestMemoryState_RetainRunning_AlreadyRemovedUnaffected(t *testing.T) {
+	state := NewMemoryState()
+	state.Upsert("c1", "app", time.Now(), []*domain.RecordIntent{
+		makeTestIntent("app.example.com", "192.168.1.1"),
+	}, "running")
+	state.MarkRemoved("c1")
+
+	// c1 is already removed; an empty running set should prune nothing new.
+	if removed := state.RetainRunning(map[string]struct{}{}); removed != 0 {
+		t.Errorf("expected 0 newly pruned, got %d", removed)
+	}
+}
+
 func TestMemoryState_MarkRemoved_NotExists(t *testing.T) {
 	state := NewMemoryState()
 

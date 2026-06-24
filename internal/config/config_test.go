@@ -16,6 +16,7 @@ func validConfig() *Config {
 			HostIPv6:          "::1",
 			Hostname:          "test-host",
 			PollInterval:      5,
+			HeartbeatTTL:      30,
 		},
 		Etcd: EtcdConfig{
 			Endpoints:         []string{"http://localhost:2379"},
@@ -26,6 +27,11 @@ func validConfig() *Config {
 		},
 		Logging: LoggingConfig{
 			Level: "INFO",
+		},
+		Docker: DockerConfig{
+			EventBufferSize:         100,
+			ReconnectInitialBackoff: 1.0,
+			ReconnectMaxBackoff:     30.0,
 		},
 	}
 }
@@ -149,6 +155,24 @@ func TestConfig_Validate_NegativePollInterval(t *testing.T) {
 	}
 }
 
+func TestConfig_Validate_ZeroHeartbeatTTL(t *testing.T) {
+	cfg := validConfig()
+	cfg.App.HeartbeatTTL = 0
+
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error for zero HeartbeatTTL")
+	}
+}
+
+func TestConfig_Validate_NegativeHeartbeatTTL(t *testing.T) {
+	cfg := validConfig()
+	cfg.App.HeartbeatTTL = -1
+
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error for negative HeartbeatTTL")
+	}
+}
+
 func TestConfig_Validate_NoEndpoints(t *testing.T) {
 	cfg := validConfig()
 	cfg.Etcd.Endpoints = []string{}
@@ -218,6 +242,58 @@ func TestConfig_Validate_MultipleEndpoints(t *testing.T) {
 	}
 }
 
+func TestConfig_Validate_PathPrefixOverlapsHeartbeat(t *testing.T) {
+	for _, pp := range []string{
+		"/",
+		HeartbeatKeyPrefix,           // exact match
+		"/docker-coredns-sync",       // parent of the heartbeat prefix
+		HeartbeatKeyPrefix + "/host", // child of the heartbeat prefix
+	} {
+		t.Run(pp, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Etcd.PathPrefix = pp
+			if err := cfg.validate(); err == nil {
+				t.Errorf("expected error for path_prefix %q overlapping heartbeat prefix", pp)
+			}
+		})
+	}
+}
+
+func TestConfig_Validate_PathPrefixNonOverlapping(t *testing.T) {
+	for _, pp := range []string{"/skydns", "/dns", "/docker-coredns-sync-records"} {
+		t.Run(pp, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Etcd.PathPrefix = pp
+			if err := cfg.validate(); err != nil {
+				t.Errorf("expected path_prefix %q to be valid, got: %v", pp, err)
+			}
+		})
+	}
+}
+
+func TestConfig_Validate_TLSConfiguredWithoutHTTPSEndpoint(t *testing.T) {
+	cfg := validConfig()
+	cfg.Etcd.Endpoints = []string{"http://localhost:2379"}
+	cfg.Etcd.TLS.CAFile = "/etc/ssl/ca.pem"
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error when TLS is configured but no endpoint uses https://")
+	}
+
+	// The same TLS settings with an https:// endpoint are valid.
+	cfg.Etcd.Endpoints = []string{"https://localhost:2379"}
+	if err := cfg.validate(); err != nil {
+		t.Errorf("expected TLS with an https:// endpoint to be valid, got: %v", err)
+	}
+}
+
+func TestConfig_Validate_PasswordWithoutUsername(t *testing.T) {
+	cfg := validConfig()
+	cfg.Etcd.Password = "secret"
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error when etcd.password is set without etcd.username")
+	}
+}
+
 func TestConfig_Validate_EmptyPathPrefix(t *testing.T) {
 	cfg := validConfig()
 	cfg.Etcd.PathPrefix = ""
@@ -226,6 +302,39 @@ func TestConfig_Validate_EmptyPathPrefix(t *testing.T) {
 
 	if err == nil {
 		t.Error("expected error for empty PathPrefix")
+	}
+}
+
+func TestConfig_Validate_HTTPEnabledRequiresListenAddr(t *testing.T) {
+	cfg := validConfig()
+	cfg.HTTP.Enabled = true
+	cfg.HTTP.ListenAddr = ""
+
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error when http.enabled is true but listen_addr is empty")
+	}
+}
+
+func TestConfig_Validate_InvalidEventBufferSize(t *testing.T) {
+	cfg := validConfig()
+	cfg.Docker.EventBufferSize = 0
+
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error for non-positive docker.event_buffer_size")
+	}
+}
+
+func TestConfig_Validate_InvalidReconnectBackoff(t *testing.T) {
+	cfg := validConfig()
+	cfg.Docker.ReconnectInitialBackoff = 0
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error for non-positive reconnect_initial_backoff")
+	}
+
+	cfg = validConfig()
+	cfg.Docker.ReconnectMaxBackoff = cfg.Docker.ReconnectInitialBackoff - 0.5
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error when reconnect_max_backoff < reconnect_initial_backoff")
 	}
 }
 
@@ -505,6 +614,12 @@ func TestLoad_Success_NoConfigFile_UsesDefaults(t *testing.T) {
 	}
 	if cfg.App.PollInterval != 5 {
 		t.Errorf("expected default poll interval 5, got %d", cfg.App.PollInterval)
+	}
+	if cfg.App.RecordTTL != 0 {
+		t.Errorf("expected default record_ttl 0, got %d", cfg.App.RecordTTL)
+	}
+	if cfg.App.HeartbeatTTL != 30 {
+		t.Errorf("expected default heartbeat_ttl 30, got %d", cfg.App.HeartbeatTTL)
 	}
 }
 

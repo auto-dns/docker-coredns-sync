@@ -40,13 +40,56 @@ func (s *MemoryState) Upsert(containerId, containerName string, created time.Tim
 	}
 }
 
-// MarkRemoved marks a container state as removed.
+// resyncPruneThreshold is the number of consecutive resyncs a running container
+// must be absent from the live set before it is pruned. Debouncing avoids
+// removing a container that is only transiently missing from a single snapshot
+// (e.g. mid-restart, or a list race).
+const resyncPruneThreshold = 2
+
+// RetainRunning reconciles tracked state against the set of currently-running
+// container IDs reported on a (re)connection to the Docker daemon, used to
+// catch stop/die events that may have been missed (e.g. the daemon restarted
+// and lost its event history). A running container absent from the set has its
+// miss counter incremented and is pruned only once it has been absent for
+// resyncPruneThreshold consecutive resyncs; a container present in the set has
+// its counter reset. It returns the number of containers newly pruned.
+//
+// Pruned containers are deleted outright rather than retained in a removed
+// state, so the map does not grow without bound across container churn. Note the
+// debounce can still, in the rare case of a genuinely-running container that is
+// absent from resyncPruneThreshold consecutive snapshots (e.g. a Docker list
+// race), prune a live container; it is re-added only when it next emits a
+// start/detection event.
+func (s *MemoryState) RetainRunning(runningIds map[string]struct{}) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	removed := 0
+	for id, cs := range s.containers {
+		if cs.Status != domain.StatusRunning {
+			continue
+		}
+		if _, ok := runningIds[id]; ok {
+			cs.missedResyncs = 0
+			continue
+		}
+		cs.missedResyncs++
+		if cs.missedResyncs >= resyncPruneThreshold {
+			delete(s.containers, id)
+			removed++
+		}
+	}
+	return removed
+}
+
+// MarkRemoved deletes a container's tracked state in response to an authoritative
+// stop/die event. It returns true if the container was tracked. The entry is
+// removed outright (rather than retained in a removed state) so the map stays
+// bounded; a removed container contributes no desired records either way.
 func (s *MemoryState) MarkRemoved(containerId string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if state, exists := s.containers[containerId]; exists {
-		state.Status = domain.StatusRemoved
-		state.LastUpdated = time.Now()
+	if _, exists := s.containers[containerId]; exists {
+		delete(s.containers, containerId)
 		return true
 	}
 	return false

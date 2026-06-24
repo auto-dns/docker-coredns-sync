@@ -10,6 +10,13 @@
 - Multiple domain support per container
 - Prevents CNAME cycles
 - Automatically removes stale records
+- Auto-reconnects to the Docker event stream with backoff if it drops
+- Optional health/readiness HTTP endpoints (`/healthz`, `/readyz`)
+- Optional Prometheus metrics endpoint (`/metrics`)
+- etcd authentication and TLS (incl. mutual TLS) support
+- Dry-run mode to preview changes without writing to etcd
+- **Per-record TTL** control via config default or label override
+- **Multi-host aware**: each host publishes a liveness heartbeat and garbage-collects records left behind by hosts that are permanently gone
 - Graceful shutdown support
 - Flexible configuration via **flags**, **env vars**, and **config file**
 - Supports both **YAML** and **JSON** config formats
@@ -28,8 +35,8 @@
 - `coredns.a.value=192.168.1.123` *(optional, defaults to `host_ipv4`)*
 
 ### AAAA Record
-- `coredns.a.name=foo.example.com`
-- `coredns.a.value=fd20:0:1::123` *(optional, defaults to `host_ipv6`)*
+- `coredns.aaaa.name=foo.example.com`
+- `coredns.aaaa.value=fd20:0:1::123` *(optional, defaults to `host_ipv6`)*
 
 ### CNAME Record
 
@@ -51,7 +58,26 @@ coredns.cname.app.value=target.example.com
 ### Optional
 
 - `coredns.force=true` — Force registration for all records in the container
-- `coredns.a.name.force=true` — Force a specific A record
+- `coredns.a.force=true` — Force a specific A record
+- `coredns.a.ttl=300` — Per-record TTL in seconds. Overrides the `app.record_ttl`
+  default. For aliased records use `coredns.a.<alias>.ttl` (e.g.
+  `coredns.a.proxy.ttl=60`). A non-numeric value is ignored. When neither a
+  label nor `app.record_ttl` sets a TTL, the field is omitted and CoreDNS
+  applies its own default.
+
+### Case sensitivity
+
+Label parsing treats each segment of a label key differently, and getting the
+case wrong on a case-sensitive segment causes the label to be **silently
+ignored** rather than reported as an error:
+
+| Segment | Example | Case-sensitive? | Notes |
+|---------|---------|-----------------|-------|
+| Prefix | `coredns` in `coredns.a.name` | **Yes** | Must match `app.docker_label_prefix` exactly. `Coredns.a.name` is not recognized. |
+| Record kind | `a` / `aaaa` / `cname` | No | Normalized case-insensitively, so `coredns.A.name` and `coredns.a.name` are equivalent. |
+| Field | `name` / `value` / `force` / `ttl` | **Yes** | Must be lowercase. `coredns.a.Name` is silently ignored. |
+| Alias | `proxy` in `coredns.a.proxy.name` | **Yes** | Used verbatim; the alias only groups a record's fields together and is not otherwise interpreted. |
+| Boolean values | `true` for `coredns.enabled` / `coredns.force` | No | `true`, `True`, and `TRUE` are all accepted. |
 
 ---
 
@@ -94,15 +120,60 @@ Configuration values can be provided via:
 |------|------------|---------|------|---------|-------------|
 | `--app.allowed-record-types` | `app.allowed_record_types` | `DOCKER_COREDNS_SYNC_APP_ALLOWED_RECORD_TYPES` | `[]string` | `["A", "CNAME"]` | DNS record types to allow |
 | `--app.docker-label-prefix` | `app.docker_label_prefix` | `DOCKER_COREDNS_SYNC_APP_DOCKER_LABEL_PREFIX` | `string` | `"coredns"` | Docker label namespace |
-| `--app.host-ip` | `app.host_ip` | `DOCKER_COREDNS_SYNC_APP_HOST_IP` | `string` | `"127.0.0.1"` | IP to use for A records |
-| `--app.hostname` | `app.hostname` | `DOCKER_COREDNS_SYNC_APP_HOSTNAME` | `string` | `"your-hostname"` | Unique logical hostname for this node |
+| `--app.host-ipv4` | `app.host_ipv4` | `DOCKER_COREDNS_SYNC_APP_HOST_IPV4` | `string` | `""` | Default IPv4 address for value-less A records. When empty, A records without an explicit value are skipped |
+| `--app.host-ipv6` | `app.host_ipv6` | `DOCKER_COREDNS_SYNC_APP_HOST_IPV6` | `string` | `""` | Default IPv6 address for value-less AAAA records. When empty, AAAA records without an explicit value are skipped |
+| `--app.hostname` | `app.hostname` | `DOCKER_COREDNS_SYNC_APP_HOSTNAME` | `string` | `""` | Unique logical hostname for this node. **Required** — startup fails if empty |
 | `--app.poll-interval` | `app.poll_interval` | `DOCKER_COREDNS_SYNC_APP_POLL_INTERVAL` | `int` | `5` | How often to reconcile the registry (in seconds) |
+| `--app.dry-run` | `app.dry_run` | `DOCKER_COREDNS_SYNC_APP_DRY_RUN` | `bool` | `false` | Log planned etcd changes without applying them |
+| `--app.record-ttl` | `app.record_ttl` | `DOCKER_COREDNS_SYNC_APP_RECORD_TTL` | `uint` | `0` | Default DNS record TTL in seconds (`0` = unset; CoreDNS uses its own default). Overridable per record via a `coredns.<kind>[.<alias>].ttl` label |
+| `--app.heartbeat-ttl` | `app.heartbeat_ttl` | `DOCKER_COREDNS_SYNC_APP_HEARTBEAT_TTL` | `int` | `30` | Lease TTL (seconds) for this host's liveness key; doubles as the grace period before another host garbage-collects records owned by a host that stopped renewing. Must be greater than 0 (see [Multi-host Behavior](#multi-host-behavior--record-garbage-collection)) |
 | *(config file only)* | `etcd.endpoints` | `DOCKER_COREDNS_SYNC_ETCD_ENDPOINTS` | `[]string` | `["http://localhost:2379"]` | etcd endpoint URLs (supports multiple for cluster) |
 | `--etcd.path-prefix` | `etcd.path_prefix` | `DOCKER_COREDNS_SYNC_ETCD_PATH_PREFIX` | `string` | `"/skydns"` | etcd base path |
+| `--etcd.username` | `etcd.username` | `DOCKER_COREDNS_SYNC_ETCD_USERNAME` | `string` | `""` | Username for etcd authentication (requires `etcd.password`) |
+| *(config/env only)* | `etcd.password` | `DOCKER_COREDNS_SYNC_ETCD_PASSWORD` | `string` | `""` | Password for etcd authentication. Intentionally has no CLI flag — a password on the command line is exposed in the process list and shell history; use the env var or config file |
+| `--etcd.tls.ca-file` | `etcd.tls.ca_file` | `DOCKER_COREDNS_SYNC_ETCD_TLS_CA_FILE` | `string` | `""` | CA certificate (PEM) used to verify the etcd server |
+| `--etcd.tls.cert-file` | `etcd.tls.cert_file` | `DOCKER_COREDNS_SYNC_ETCD_TLS_CERT_FILE` | `string` | `""` | Client certificate (PEM) for mutual TLS (requires `key_file`) |
+| `--etcd.tls.key-file` | `etcd.tls.key_file` | `DOCKER_COREDNS_SYNC_ETCD_TLS_KEY_FILE` | `string` | `""` | Client private key (PEM) for mutual TLS (requires `cert_file`) |
+| `--etcd.tls.insecure-skip-verify` | `etcd.tls.insecure_skip_verify` | `DOCKER_COREDNS_SYNC_ETCD_TLS_INSECURE_SKIP_VERIFY` | `bool` | `false` | Skip etcd server certificate verification (insecure) |
 | `--etcd.lock-ttl` | `etcd.lock_ttl` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TTL` | `float` | `5.0` | Lock lease time-to-live in seconds |
 | `--etcd.lock-timeout` | `etcd.lock_timeout` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_TIMEOUT` | `float` | `2.0` | Lock acquisition timeout |
 | `--etcd.lock-retry-interval` | `etcd.lock_retry_interval` | `DOCKER_COREDNS_SYNC_ETCD_LOCK_RETRY_INTERVAL` | `float` | `0.1` | Retry interval for lock acquisition |
 | `--log.level` | `log.level` | `DOCKER_COREDNS_SYNC_LOG_LEVEL` | `string` | `"INFO"` | Logging level (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`) |
+| `--http.enabled` | `http.enabled` | `DOCKER_COREDNS_SYNC_HTTP_ENABLED` | `bool` | `false` | Enable the HTTP server for health/readiness endpoints |
+| `--http.listen-addr` | `http.listen_addr` | `DOCKER_COREDNS_SYNC_HTTP_LISTEN_ADDR` | `string` | `":8080"` | Listen address for the HTTP server (shared by health and metrics) |
+| `--metrics.enabled` | `metrics.enabled` | `DOCKER_COREDNS_SYNC_METRICS_ENABLED` | `bool` | `false` | Expose the Prometheus `/metrics` endpoint on the HTTP server |
+| *(config file only)* | `docker.event_buffer_size` | `DOCKER_COREDNS_SYNC_DOCKER_EVENT_BUFFER_SIZE` | `int` | `100` | Buffer size for the Docker event channel |
+| *(config file only)* | `docker.reconnect_initial_backoff` | `DOCKER_COREDNS_SYNC_DOCKER_RECONNECT_INITIAL_BACKOFF` | `float` | `1.0` | Initial reconnect backoff (seconds) when the Docker event stream drops |
+| *(config file only)* | `docker.reconnect_max_backoff` | `DOCKER_COREDNS_SYNC_DOCKER_RECONNECT_MAX_BACKOFF` | `float` | `30.0` | Maximum reconnect backoff (seconds) |
+
+---
+
+## Multi-host Behavior & Record Garbage Collection
+
+Each instance scopes ownership of etcd records by its `app.hostname`. A host only
+removes records it owns — except for the orphan cleanup described below.
+
+Every instance publishes a **lease-backed heartbeat** key under a prefix outside
+`etcd.path_prefix` (so CoreDNS never sees these keys) and keeps it alive while it
+runs. Heartbeating is always on. During reconciliation a host garbage-collects
+any record whose owner has **no live heartbeat** — this is how a permanently
+removed node is cleaned up: once its lease expires, peers reclaim its records
+automatically, no manual step required.
+
+The lease TTL (`app.heartbeat_ttl`) is the grace period: an owner must be silent
+for longer than `heartbeat_ttl` before its records become eligible for removal,
+so a brief outage or restart will **not** cause another host to delete its
+records. To retire a host, just stop its daemon and wait one grace period.
+
+A host only ever runs cross-host GC while it is *itself* actively heartbeating —
+if it failed to register its own heartbeat (e.g. etcd was briefly unreachable at
+startup), it performs no GC that run and never deletes a peer's records on the
+basis of liveness it cannot vouch for. The liveness lookup uses a linearizable
+etcd read, since it authorizes deletions.
+
+> **Upgrading a multi-host fleet:** roll out this version to all hosts together. A host
+> running an older version doesn't publish a heartbeat, so it will look "dead" to
+> upgraded hosts, which would then GC its records.
 
 ---
 
@@ -131,20 +202,94 @@ app:
   host_ipv6: fd20:0:1::100
   hostname: homeserver
   poll_interval: 5
+  record_ttl: 0      # 0 = let CoreDNS apply its default; override per record with a .ttl label
+  heartbeat_ttl: 30  # liveness lease + cross-host GC grace period; 0 disables
 
 log:
   level: INFO
 
 etcd:
   endpoints:
-    - http://192.168.1.10:2379
-    - http://192.168.1.11:2379
-    - http://192.168.1.12:2379
+    - https://192.168.1.10:2379
+    - https://192.168.1.11:2379
+    - https://192.168.1.12:2379
   path_prefix: /skydns
+  # Authentication (optional)
+  username: coredns-sync
+  password: super-secret
+  # TLS (optional; required for any non-loopback etcd over https://)
+  tls:
+    ca_file: /etc/docker-coredns-sync/etcd-ca.pem
+    cert_file: /etc/docker-coredns-sync/etcd-client.pem
+    key_file: /etc/docker-coredns-sync/etcd-client-key.pem
+    insecure_skip_verify: false
   lock_ttl: 5.0
   lock_timeout: 2.0
   lock_retry_interval: 0.1
+
+http:
+  enabled: true
+  listen_addr: ":8080"
+
+metrics:
+  enabled: true
 ```
+
+---
+
+## Health & Readiness
+
+When `http.enabled` is `true`, an HTTP server listens on `http.listen_addr`
+(default `:8080`) and exposes:
+
+- `GET /healthz` — liveness; returns `200` while the process is running.
+- `GET /readyz` — readiness; returns `200` only when the Docker event stream is
+  connected and a reconciliation has succeeded within the last few poll
+  intervals, otherwise `503` with a short reason.
+
+These are suitable for container/orchestrator liveness and readiness probes.
+
+---
+
+## Metrics
+
+When `metrics.enabled` is `true`, a Prometheus endpoint is served at `GET
+/metrics` on the same HTTP server as the health endpoints (`http.listen_addr`,
+default `:8080`). The server starts whenever `http.enabled` **or**
+`metrics.enabled` is set, so metrics can be exposed without the health
+endpoints.
+
+Exposed series (all prefixed `dcs_`):
+
+- `dcs_reconcile_duration_seconds` — histogram of reconciliation-pass duration.
+- `dcs_reconcile_last_success_timestamp_seconds` — Unix time of the last
+  successful reconciliation.
+- `dcs_reconcile_total{result="success|error|dry_run"}` — reconciliation passes
+  by result. Dry-run passes are counted as `dry_run` and never refresh the
+  last-success gauge.
+- `dcs_records_added_total` / `dcs_records_removed_total` — cumulative records
+  written to or removed from etcd.
+- `dcs_records_skipped` — gauge of desired records dropped during conflict
+  filtering on the most recent pass (steady-state, not cumulative).
+- `dcs_etcd_errors_total` / `dcs_etcd_lock_failures_total` — etcd operation
+  errors and lock-acquisition failures.
+- `dcs_docker_disconnects_total` — Docker event-stream disconnects.
+
+---
+
+## etcd Authentication & TLS
+
+For any etcd deployment beyond a trusted loopback, configure authentication
+and/or TLS under `etcd`:
+
+- `etcd.username` / `etcd.password` enable password authentication. A username
+  without a password is rejected at startup.
+- `etcd.tls.ca_file` sets the CA used to verify the etcd server certificate
+  (use this for `https://` endpoints with a private CA).
+- `etcd.tls.cert_file` / `etcd.tls.key_file` enable mutual TLS; both must be
+  provided together or startup fails.
+- `etcd.tls.insecure_skip_verify` disables server certificate verification —
+  for testing only.
 
 ---
 

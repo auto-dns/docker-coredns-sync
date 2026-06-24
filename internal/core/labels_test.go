@@ -250,6 +250,86 @@ func TestParseLabels_MultipleAliases(t *testing.T) {
 	}
 }
 
+func TestParseLabels_RecordLevelTTL(t *testing.T) {
+	labels := map[string]string{
+		"coredns.enabled": "true",
+		"coredns.A.name":  "app.example.com",
+		"coredns.A.value": "192.168.1.1",
+		"coredns.A.ttl":   "300",
+	}
+
+	result := ParseLabels("coredns", labels)
+
+	if len(result.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(result.Records))
+	}
+	rec := result.Records[0]
+	if rec.TTL == nil {
+		t.Fatal("expected TTL to be set")
+	}
+	if *rec.TTL != 300 {
+		t.Errorf("expected TTL 300, got %d", *rec.TTL)
+	}
+}
+
+func TestParseLabels_RecordLevelTTLWithAlias(t *testing.T) {
+	labels := map[string]string{
+		"coredns.enabled":     "true",
+		"coredns.A.web.name":  "web.example.com",
+		"coredns.A.web.value": "192.168.1.1",
+		"coredns.A.web.ttl":   "60",
+	}
+
+	result := ParseLabels("coredns", labels)
+
+	if len(result.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(result.Records))
+	}
+	rec := result.Records[0]
+	if rec.TTL == nil || *rec.TTL != 60 {
+		t.Errorf("expected TTL 60, got %v", rec.TTL)
+	}
+}
+
+func TestParseLabels_TTLNotSetIsNil(t *testing.T) {
+	labels := map[string]string{
+		"coredns.enabled": "true",
+		"coredns.A.name":  "app.example.com",
+		"coredns.A.value": "192.168.1.1",
+	}
+
+	result := ParseLabels("coredns", labels)
+
+	if len(result.Records) != 1 {
+		t.Fatalf("expected 1 record, got %d", len(result.Records))
+	}
+	if result.Records[0].TTL != nil {
+		t.Errorf("expected TTL to be nil when unspecified, got %v", *result.Records[0].TTL)
+	}
+}
+
+func TestParseLabels_InvalidTTLIgnored(t *testing.T) {
+	for _, val := range []string{"abc", "-5", "3.5", ""} {
+		t.Run(val, func(t *testing.T) {
+			labels := map[string]string{
+				"coredns.enabled": "true",
+				"coredns.A.name":  "app.example.com",
+				"coredns.A.value": "192.168.1.1",
+				"coredns.A.ttl":   val,
+			}
+
+			result := ParseLabels("coredns", labels)
+
+			if len(result.Records) != 1 {
+				t.Fatalf("expected 1 record, got %d", len(result.Records))
+			}
+			if result.Records[0].TTL != nil {
+				t.Errorf("expected invalid TTL %q to be ignored (nil), got %v", val, *result.Records[0].TTL)
+			}
+		})
+	}
+}
+
 func TestParseLabels_RecordLevelForce(t *testing.T) {
 	labels := map[string]string{
 		"coredns.enabled":       "true",

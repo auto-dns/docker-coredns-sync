@@ -12,11 +12,13 @@ import (
 
 // SyncEngine coordinates event ingestion, state updates, and registry reconciliation.
 type SyncEngine struct {
-	logger zerolog.Logger
-	cfg    *config.AppConfig
-	gen    generator
-	state  state
-	reg    upstreamRegistry
+	logger   zerolog.Logger
+	cfg      *config.AppConfig
+	gen      generator
+	state    state
+	reg      upstreamRegistry
+	reporter reconcileReporter
+	metrics  reconcileMetrics
 }
 
 func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, reg upstreamRegistry, state state) *SyncEngine {
@@ -29,8 +31,28 @@ func NewSyncEngine(logger zerolog.Logger, cfg *config.AppConfig, gen generator, 
 	}
 }
 
+// SetReconcileReporter registers an optional observer that is notified of the
+// outcome of each reconciliation pass. Safe to leave unset.
+func (se *SyncEngine) SetReconcileReporter(r reconcileReporter) {
+	se.reporter = r
+}
+
+// SetMetrics registers an optional sink for quantitative reconciliation
+// metrics. Safe to leave unset.
+func (se *SyncEngine) SetMetrics(m reconcileMetrics) {
+	se.metrics = m
+}
+
 func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
 	switch {
+	case evt.EventType == domain.EventTypeResync:
+		running := make(map[string]struct{}, len(evt.RunningContainerIds))
+		for _, id := range evt.RunningContainerIds {
+			running[id] = struct{}{}
+		}
+		if removed := se.state.RetainRunning(running); removed > 0 {
+			se.logger.Info().Int("removed", removed).Msg("Pruned state for containers no longer running after resync")
+		}
 	case evt.Container.Id == "":
 		se.logger.Warn().Str("event_payload", fmt.Sprintf("%+v", evt)).Msg("handled container event with no container id")
 	case !evt.EventType.IsValid():
@@ -50,6 +72,25 @@ func (se *SyncEngine) handleEvent(evt domain.ContainerEvent) {
 
 func (se *SyncEngine) Run(ctx context.Context) error {
 	se.logger.Info().Msg("Starting SyncEngine")
+
+	// Surface configuration that will silently drop records, prominently, once
+	// at startup rather than only as per-record warnings buried in the logs.
+	if se.cfg.HostIPv4 == "" {
+		se.logger.Warn().Msg("app.host_ipv4 is not set: value-less A records (coredns.A.<name> with no .value) will be SKIPPED")
+	}
+	if se.cfg.HostIPv6 == "" {
+		se.logger.Warn().Msg("app.host_ipv6 is not set: value-less AAAA records (coredns.AAAA.<name> with no .value) will be SKIPPED")
+	}
+
+	// Publish this host's liveness key so other hosts won't GC our records, and
+	// so we participate in cross-host GC of records owned by dead hosts. In
+	// dry-run the daemon must not write to etcd at all, so heartbeating (and
+	// therefore cross-host GC participation) is skipped.
+	if se.cfg.DryRun {
+		se.logger.Info().Msg("dry-run: skipping heartbeat; this host will not publish liveness or participate in cross-host GC")
+	} else if err := se.reg.StartHeartbeat(ctx); err != nil {
+		se.logger.Error().Err(err).Msg("failed to start heartbeat; cross-host GC will be disabled this run")
+	}
 
 	// Step 1: Subscribe to Docker events
 	eventCh, err := se.gen.Subscribe(ctx)
@@ -83,36 +124,72 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 		select {
 		case <-ticker.C:
 			se.logger.Debug().Msg("Reconciliation loop tick")
+			start := time.Now()
+			var added, removed, skipped int
 			err := se.reg.LockTransaction(ctx, []string{"__global__"}, func() error {
 				actual, err := se.reg.List(ctx)
 				if err != nil {
 					return fmt.Errorf("error listing registry records: %w", err)
 				}
+				// Live host set drives cross-host GC. On error, fall back to nil
+				// (GC disabled this tick) rather than risk deleting live records.
+				liveHosts, err := se.reg.GetLiveHostnames(ctx)
+				if err != nil {
+					se.logger.Warn().Err(err).Msg("could not fetch live hostnames; skipping cross-host GC this tick")
+					liveHosts = nil
+				}
 				desired := se.state.GetAllDesiredRecordIntents()
 				// Filter out any internally inconsistent intents:
 				desiredReconciled := FilterRecordIntents(desired, se.logger)
-				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, se.logger)
+				skipped = len(desired) - len(desiredReconciled)
+				toAdd, toRemove := ReconcileAndValidate(desiredReconciled, actual, se.cfg, liveHosts, se.logger)
+				if se.cfg.DryRun {
+					for _, rec := range toRemove {
+						se.logger.Info().Str("record", rec.Render()).Msg("[dry-run] would remove record")
+					}
+					for _, rec := range toAdd {
+						se.logger.Info().Str("record", rec.Render()).Msg("[dry-run] would register record")
+					}
+					return nil
+				}
+				var writeErrs int
 				for _, rec := range toRemove {
 					if err := se.reg.Remove(ctx, rec); err != nil {
+						writeErrs++
 						se.logger.Error().Err(err).Msg("Error removing record")
+					} else {
+						removed++
 					}
 				}
 				for _, rec := range toAdd {
 					if err := se.reg.Register(ctx, rec); err != nil {
+						writeErrs++
 						se.logger.Error().Err(err).Msg("Error registering record")
+					} else {
+						added++
 					}
+				}
+				if writeErrs > 0 {
+					// Surface write failures so the reconcile pass is not
+					// reported as successful (e.g. to readiness).
+					return fmt.Errorf("%d record write(s) failed during reconciliation", writeErrs)
 				}
 				return nil
 			})
+			if se.reporter != nil {
+				se.reporter.RecordReconcile(err)
+			}
+			if se.metrics != nil {
+				se.metrics.ObserveReconcile(time.Since(start), added, removed, skipped, err)
+			}
 			if err != nil {
 				se.logger.Error().Err(err).Msg("Sync error")
 			}
 		case <-ctx.Done():
 			se.logger.Info().Msg("SyncEngine shutting down")
-			err := se.reg.Close()
-			if err != nil {
-				se.logger.Error().Err(err).Msg("Error closing registry")
-			}
+			// Stop the heartbeat promptly so peers see this host leave; the etcd
+			// client itself is closed by the App, which owns its lifecycle.
+			se.reg.StopHeartbeat()
 			return ctx.Err()
 		}
 	}

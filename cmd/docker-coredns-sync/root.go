@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -55,9 +56,11 @@ func runWithDeps(cfg *config.Config, factory AppFactory, sigCh <-chan os.Signal)
 		}
 	}()
 
-	if err := application.Run(ctx); err != nil {
+	if err := application.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("app run error: %w", err)
 	}
+	// A context.Canceled error is the expected outcome of a signal-driven
+	// shutdown, so it is treated as a clean exit (return nil).
 	return nil
 }
 
@@ -105,12 +108,42 @@ func init() {
 	rootCmd.PersistentFlags().Int("app.poll-interval", 0, "Polling interval (in seconds) for reconciliation")
 	viper.BindPFlag("app.poll_interval", rootCmd.PersistentFlags().Lookup("app.poll-interval"))
 
+	rootCmd.PersistentFlags().Bool("app.dry-run", false, "Log planned etcd changes without applying them")
+	viper.BindPFlag("app.dry_run", rootCmd.PersistentFlags().Lookup("app.dry-run"))
+
+	// Flag defaults are left at zero values so an unset flag does not override the
+	// real defaults configured via viper.SetDefault in internal/config.
+	rootCmd.PersistentFlags().Uint32("app.record-ttl", 0, "Default DNS record TTL in seconds (0 = unset; CoreDNS uses its own default)")
+	viper.BindPFlag("app.record_ttl", rootCmd.PersistentFlags().Lookup("app.record-ttl"))
+
+	rootCmd.PersistentFlags().Int("app.heartbeat-ttl", 0, "Lease TTL (seconds) for this host's liveness key; also the grace period before peers GC a stopped host's records")
+	viper.BindPFlag("app.heartbeat_ttl", rootCmd.PersistentFlags().Lookup("app.heartbeat-ttl"))
+
 	// EtcdConfig Flags
 	rootCmd.PersistentFlags().StringArray("etcd-endpoints", []string{"http://localhost:2379"}, "etcd endpoints to connect to (can specify multiple times)")
 	viper.BindPFlag("etcd.endpoints", rootCmd.PersistentFlags().Lookup("etcd-endpoints"))
 
 	rootCmd.PersistentFlags().String("etcd.path-prefix", "", "etcd key path prefix (e.g., /skydns)")
 	viper.BindPFlag("etcd.path_prefix", rootCmd.PersistentFlags().Lookup("etcd.path-prefix"))
+
+	rootCmd.PersistentFlags().String("etcd.username", "", "Username for etcd authentication")
+	viper.BindPFlag("etcd.username", rootCmd.PersistentFlags().Lookup("etcd.username"))
+
+	// Note: there is intentionally no --etcd.password flag. A password on the
+	// command line is exposed in the process list and shell history; set it via
+	// the DOCKER_COREDNS_SYNC_ETCD_PASSWORD env var or the config file instead.
+
+	rootCmd.PersistentFlags().String("etcd.tls.ca-file", "", "Path to the CA certificate for the etcd connection")
+	viper.BindPFlag("etcd.tls.ca_file", rootCmd.PersistentFlags().Lookup("etcd.tls.ca-file"))
+
+	rootCmd.PersistentFlags().String("etcd.tls.cert-file", "", "Path to the client certificate for the etcd connection")
+	viper.BindPFlag("etcd.tls.cert_file", rootCmd.PersistentFlags().Lookup("etcd.tls.cert-file"))
+
+	rootCmd.PersistentFlags().String("etcd.tls.key-file", "", "Path to the client key for the etcd connection")
+	viper.BindPFlag("etcd.tls.key_file", rootCmd.PersistentFlags().Lookup("etcd.tls.key-file"))
+
+	rootCmd.PersistentFlags().Bool("etcd.tls.insecure-skip-verify", false, "Skip verification of the etcd server certificate (insecure)")
+	viper.BindPFlag("etcd.tls.insecure_skip_verify", rootCmd.PersistentFlags().Lookup("etcd.tls.insecure-skip-verify"))
 
 	rootCmd.PersistentFlags().Float64("etcd.lock-ttl", 0, "TTL (in seconds) for etcd locks")
 	viper.BindPFlag("etcd.lock_ttl", rootCmd.PersistentFlags().Lookup("etcd.lock-ttl"))
@@ -124,6 +157,17 @@ func init() {
 	// LoggingConfig Flag
 	rootCmd.PersistentFlags().String("log.level", "", "Log level (e.g., TRACE, DEBUG, INFO, WARN, ERROR, FATAL)")
 	viper.BindPFlag("log.level", rootCmd.PersistentFlags().Lookup("log.level"))
+
+	// HTTPConfig Flags
+	rootCmd.PersistentFlags().Bool("http.enabled", false, "Enable the HTTP server for health/readiness endpoints")
+	viper.BindPFlag("http.enabled", rootCmd.PersistentFlags().Lookup("http.enabled"))
+
+	rootCmd.PersistentFlags().String("http.listen-addr", "", "Listen address for the HTTP server (e.g., :8080)")
+	viper.BindPFlag("http.listen_addr", rootCmd.PersistentFlags().Lookup("http.listen-addr"))
+
+	// MetricsConfig Flag
+	rootCmd.PersistentFlags().Bool("metrics.enabled", false, "Expose the Prometheus /metrics endpoint on the HTTP server")
+	viper.BindPFlag("metrics.enabled", rootCmd.PersistentFlags().Lookup("metrics.enabled"))
 }
 
 // Execute runs the root command.

@@ -84,3 +84,18 @@ When two containers want the same DNS name:
 ### Config
 
 Config is handled by Viper in `internal/config/config.go`. The etcd connection takes `endpoints` as a `[]string` (e.g., `["http://etcd:2379"]`). `app.hostname` must be unique per node — it's used to scope ownership of etcd records.
+
+## Versioning, branches & releases
+
+See `CONTRIBUTING.md` for the full contributor guide. Key conventions:
+
+- **Versioning:** [SemVer](https://semver.org/); active line is **0.7.x**. Record changes in `CHANGELOG.md` (Keep a Changelog) under `## [Unreleased]` in the same PR.
+- **Branches:** `main` is the default/stable branch. Each release is integrated on a release branch named `vMAJOR.MINOR.PATCH` (e.g. `v0.7.0`); open PRs against the **active release branch**, not `main`. The release branch later merges into `main` and is tagged.
+- **Tags & releases:** pushing a tag `vMAJOR.MINOR.PATCH` (pre-release: `vMAJOR.MINOR.PATCH-SUFFIX`) triggers `.github/workflows/docker.yaml`, which builds/pushes the GHCR image and cuts a GitHub Release from the matching `## [MAJOR.MINOR.PATCH]` CHANGELOG section. Rename `## [Unreleased]` to the versioned heading before tagging.
+
+## Pull request conventions
+
+- Target the active release branch (`vMAJOR.MINOR.PATCH`), not `main`.
+- Link issues with closing keywords in the PR body — `Closes #N` / `Fixes #N` / `Resolves #N`. Merging to `main` auto-closes them; merging to a release branch (`v*`) labels them `awaiting-release` via `.github/workflows/awaiting-release.yaml`.
+- **Issue state** encodes pipeline position: open without `awaiting-release` = open for development; open + `awaiting-release` = merged to a release branch, not yet released; closed = released.
+- Keep changes covered by tests (`go test -race ./...`), run `make lint`/`make format`, and update `CHANGELOG.md`.

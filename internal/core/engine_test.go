@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -94,6 +95,39 @@ func TestSyncEngine_handleEvent_InvalidEventType(t *testing.T) {
 	// Should not update state for invalid event type
 	if state.upsertCalled {
 		t.Error("expected Upsert not to be called for invalid event type")
+	}
+}
+
+func TestSyncEngine_handleEvent_Resync(t *testing.T) {
+	gen := &mockGenerator{}
+	var gotIds map[string]struct{}
+	state := &mockState{
+		retainRunningFunc: func(runningIds map[string]struct{}) int {
+			gotIds = runningIds
+			return 1
+		},
+	}
+	reg := &mockRegistry{}
+	cfg := testAppConfig()
+
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+
+	engine.handleEvent(domain.ContainerEvent{
+		EventType:           domain.EventTypeResync,
+		RunningContainerIds: []string{"a", "b"},
+	})
+
+	if !state.retainRunningCalled {
+		t.Fatal("expected RetainRunning to be called on resync event")
+	}
+	if _, ok := gotIds["a"]; !ok {
+		t.Error("expected running id 'a' in set")
+	}
+	if _, ok := gotIds["b"]; !ok {
+		t.Error("expected running id 'b' in set")
+	}
+	if state.upsertCalled || state.markRemovedCalled {
+		t.Error("resync event should not Upsert or MarkRemoved directly")
 	}
 }
 
@@ -286,8 +320,8 @@ func TestSyncEngine_Run_ContextCancellation(t *testing.T) {
 	if err != context.DeadlineExceeded {
 		t.Errorf("expected context.DeadlineExceeded, got %v", err)
 	}
-	if !reg.WasCloseCalled() {
-		t.Error("expected Close to be called on shutdown")
+	if !reg.WasStopHeartbeatCalled() {
+		t.Error("expected StopHeartbeat to be called on shutdown")
 	}
 }
 
@@ -660,7 +694,7 @@ func TestSyncEngine_Run_RegisterError(t *testing.T) {
 	// Should not crash, just log error
 }
 
-func TestSyncEngine_Run_CloseError(t *testing.T) {
+func TestSyncEngine_Run_StopsHeartbeatOnShutdown(t *testing.T) {
 	eventCh := make(chan domain.ContainerEvent)
 	close(eventCh)
 
@@ -675,11 +709,7 @@ func TestSyncEngine_Run_CloseError(t *testing.T) {
 			return []*domain.RecordIntent{}
 		},
 	}
-	reg := &mockRegistry{
-		closeFunc: func() error {
-			return errors.New("close failed")
-		},
-	}
+	reg := &mockRegistry{}
 	cfg := testAppConfig()
 	cfg.PollInterval = 10 // Long enough to not trigger
 
@@ -690,12 +720,292 @@ func TestSyncEngine_Run_CloseError(t *testing.T) {
 
 	err := engine.Run(ctx)
 
-	if !reg.WasCloseCalled() {
-		t.Error("expected Close to be called")
+	if !reg.WasStopHeartbeatCalled() {
+		t.Error("expected StopHeartbeat to be called on shutdown")
 	}
-	// Context error should be returned, not Close error
 	if err != context.DeadlineExceeded {
 		t.Errorf("expected context.DeadlineExceeded, got %v", err)
+	}
+}
+
+type recordingReporter struct {
+	mu    sync.Mutex
+	calls []error
+}
+
+func (r *recordingReporter) RecordReconcile(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, err)
+}
+
+func (r *recordingReporter) count() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.calls)
+}
+
+func (r *recordingReporter) sawError() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.calls {
+		if e != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSyncEngine_Run_WriteFailureReportedAsError(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+
+	rec, _ := domain.NewA("app.example.com", "192.168.1.1")
+	desiredIntents := []*domain.RecordIntent{
+		{
+			ContainerId:   "container-123",
+			ContainerName: "my-app",
+			Created:       time.Now(),
+			Hostname:      "test-host",
+			Record:        rec,
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return desiredIntents
+		},
+	}
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{}, nil
+		},
+		registerFunc: func(ctx context.Context, ri *domain.RecordIntent) error {
+			return errors.New("etcd write failed")
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+
+	reporter := &recordingReporter{}
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+	engine.SetReconcileReporter(reporter)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() { engine.Run(ctx) }()
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	if !reg.WasRegisterCalled() {
+		t.Fatal("expected Register to be attempted")
+	}
+	if !reporter.sawError() {
+		t.Error("expected a failed write to be reported as a non-nil reconcile error")
+	}
+}
+
+func TestSyncEngine_Run_DryRunSkipsWrites(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+
+	rec, _ := domain.NewA("app.example.com", "192.168.1.1")
+	desiredIntents := []*domain.RecordIntent{
+		{
+			ContainerId:   "container-123",
+			ContainerName: "my-app",
+			Created:       time.Now(),
+			Hostname:      "test-host",
+			Record:        rec,
+		},
+	}
+
+	staleRec, _ := domain.NewA("stale.example.com", "192.168.1.99")
+	staleRecord := &domain.RecordIntent{
+		ContainerId:   "old-container",
+		ContainerName: "old-app",
+		Created:       time.Now().Add(-time.Hour),
+		Hostname:      "test-host",
+		Record:        staleRec,
+	}
+
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return desiredIntents
+		},
+	}
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{staleRecord}, nil
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+	cfg.DryRun = true
+
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() {
+		engine.Run(ctx)
+	}()
+
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	// Reconciliation still runs (list + plan), but nothing is written.
+	if !reg.WasListCalled() {
+		t.Error("expected List to be called even in dry-run")
+	}
+	if reg.WasRegisterCalled() {
+		t.Error("expected Register NOT to be called in dry-run")
+	}
+	if reg.WasRemoveCalled() {
+		t.Error("expected Remove NOT to be called in dry-run")
+	}
+	reg.mu.Lock()
+	hb := reg.startHeartbeatCalled
+	reg.mu.Unlock()
+	if hb {
+		t.Error("expected StartHeartbeat NOT to be called in dry-run (no etcd writes)")
+	}
+}
+
+func TestSyncEngine_Run_ReportsReconcileResult(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return []*domain.RecordIntent{}
+		},
+	}
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{}, nil
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+
+	reporter := &recordingReporter{}
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+	engine.SetReconcileReporter(reporter)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() {
+		engine.Run(ctx)
+	}()
+
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	if reporter.count() == 0 {
+		t.Error("expected reconcile reporter to be notified at least once")
+	}
+}
+
+type recordingMetrics struct {
+	mu      sync.Mutex
+	calls   int
+	added   int
+	removed int
+	skipped int
+	sawErr  bool
+}
+
+func (r *recordingMetrics) ObserveReconcile(_ time.Duration, added, removed, skipped int, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	r.added += added
+	r.removed += removed
+	r.skipped += skipped
+	if err != nil {
+		r.sawErr = true
+	}
+}
+
+func (r *recordingMetrics) snapshot() (calls, added, removed, skipped int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls, r.added, r.removed, r.skipped
+}
+
+func TestSyncEngine_Run_RecordsMetrics(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+
+	rec, _ := domain.NewA("app.example.com", "192.168.1.1")
+	desiredIntents := []*domain.RecordIntent{
+		{
+			ContainerId:   "container-123",
+			ContainerName: "my-app",
+			Created:       time.Now(),
+			Hostname:      "test-host",
+			Record:        rec,
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return desiredIntents
+		},
+	}
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{}, nil
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+
+	m := &recordingMetrics{}
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+	engine.SetMetrics(m)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() { engine.Run(ctx) }()
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	calls, added, _, _ := m.snapshot()
+	if calls == 0 {
+		t.Fatal("expected ObserveReconcile to be called at least once")
+	}
+	if added < 1 {
+		t.Errorf("expected at least one record counted as added, got %d", added)
+	}
+	if m.sawErr {
+		t.Error("expected no reconcile error to be reported to metrics")
 	}
 }
 
@@ -732,4 +1042,140 @@ func TestSyncEngine_Run_EventChannelClosed(t *testing.T) {
 
 	// Should continue running even after event channel closes
 	// until context is cancelled
+}
+
+func TestSyncEngine_Run_StartsHeartbeat(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return []*domain.RecordIntent{}
+		},
+	}
+	reg := &mockRegistry{}
+	cfg := testAppConfig()
+	cfg.PollInterval = 10
+
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	engine.Run(ctx)
+
+	reg.mu.Lock()
+	called := reg.startHeartbeatCalled
+	reg.mu.Unlock()
+	if !called {
+		t.Error("expected StartHeartbeat to be called on Run")
+	}
+}
+
+func TestSyncEngine_Run_GCsOrphanedRecords(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return []*domain.RecordIntent{} // we desire nothing
+		},
+	}
+
+	rec, _ := domain.NewA("ghost.example.com", "192.168.1.9")
+	orphan := &domain.RecordIntent{
+		ContainerId:   "dead-container",
+		ContainerName: "dead-app",
+		Created:       time.Now().Add(-time.Hour),
+		Hostname:      "dead-host", // owner not in live set
+		Record:        rec,
+	}
+
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{orphan}, nil
+		},
+		getLiveHostnamesFunc: func(ctx context.Context) (map[string]struct{}, error) {
+			return map[string]struct{}{"test-host": {}}, nil // dead-host absent
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() { engine.Run(ctx) }()
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	if !reg.WasRemoveCalled() {
+		t.Fatal("expected orphaned record to be removed via cross-host GC")
+	}
+	removed := reg.GetRemovedRecords()
+	if len(removed) != 1 || removed[0].Hostname != "dead-host" {
+		t.Errorf("expected exactly the dead-host record removed, got %+v", removed)
+	}
+}
+
+func TestSyncEngine_Run_GetLiveHostnamesError(t *testing.T) {
+	eventCh := make(chan domain.ContainerEvent)
+	close(eventCh)
+
+	gen := &mockGenerator{
+		subscribeFunc: func(ctx context.Context) (<-chan domain.ContainerEvent, error) {
+			return eventCh, nil
+		},
+	}
+	state := &mockState{
+		getAllDesiredFunc: func() []*domain.RecordIntent {
+			return []*domain.RecordIntent{}
+		},
+	}
+
+	rec, _ := domain.NewA("ghost.example.com", "192.168.1.9")
+	orphan := &domain.RecordIntent{
+		ContainerId:   "dead-container",
+		ContainerName: "dead-app",
+		Created:       time.Now().Add(-time.Hour),
+		Hostname:      "dead-host",
+		Record:        rec,
+	}
+
+	reg := &mockRegistry{
+		listFunc: func(ctx context.Context) ([]*domain.RecordIntent, error) {
+			return []*domain.RecordIntent{orphan}, nil
+		},
+		getLiveHostnamesFunc: func(ctx context.Context) (map[string]struct{}, error) {
+			return nil, errors.New("etcd unavailable")
+		},
+	}
+	cfg := testAppConfig()
+	cfg.PollInterval = 1
+
+	engine := NewSyncEngine(engineTestLogger(), cfg, gen, reg, state)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer cancel()
+
+	go func() { engine.Run(ctx) }()
+	time.Sleep(1200 * time.Millisecond)
+	cancel()
+
+	// On liveHosts error, GC must be skipped: the foreign record stays.
+	if reg.WasRemoveCalled() {
+		t.Error("expected no removals when GetLiveHostnames fails (GC disabled this tick)")
+	}
 }

@@ -31,16 +31,19 @@ type mockState struct {
 	mu                sync.Mutex
 	upsertFunc        func(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status domain.ContainerStatus)
 	markRemovedFunc   func(containerId string) bool
+	retainRunningFunc func(runningIds map[string]struct{}) int
 	getAllDesiredFunc func() []*domain.RecordIntent
 
 	upsertCalled        bool
 	markRemovedCalled   bool
+	retainRunningCalled bool
 	getAllDesiredCalled bool
 
 	lastUpsertContainerId   string
 	lastUpsertContainerName string
 	lastUpsertIntents       []*domain.RecordIntent
 	lastMarkRemovedId       string
+	lastRetainRunningIds    map[string]struct{}
 }
 
 func (m *mockState) Upsert(containerId, containerName string, created time.Time, intents []*domain.RecordIntent, status domain.ContainerStatus) {
@@ -68,6 +71,18 @@ func (m *mockState) MarkRemoved(containerId string) bool {
 	return true
 }
 
+func (m *mockState) RetainRunning(runningIds map[string]struct{}) int {
+	m.mu.Lock()
+	m.retainRunningCalled = true
+	m.lastRetainRunningIds = runningIds
+	m.mu.Unlock()
+
+	if m.retainRunningFunc != nil {
+		return m.retainRunningFunc(runningIds)
+	}
+	return 0
+}
+
 func (m *mockState) GetAllDesiredRecordIntents() []*domain.RecordIntent {
 	m.mu.Lock()
 	m.getAllDesiredCalled = true
@@ -92,21 +107,46 @@ func (m *mockState) WasMarkRemovedCalled() bool {
 }
 
 type mockRegistry struct {
-	mu                  sync.Mutex
-	lockTransactionFunc func(ctx context.Context, keys []string, fn func() error) error
-	listFunc            func(ctx context.Context) ([]*domain.RecordIntent, error)
-	registerFunc        func(ctx context.Context, record *domain.RecordIntent) error
-	removeFunc          func(ctx context.Context, record *domain.RecordIntent) error
-	closeFunc           func() error
+	mu                   sync.Mutex
+	startHeartbeatFunc   func(ctx context.Context) error
+	getLiveHostnamesFunc func(ctx context.Context) (map[string]struct{}, error)
+	lockTransactionFunc  func(ctx context.Context, keys []string, fn func() error) error
+	listFunc             func(ctx context.Context) ([]*domain.RecordIntent, error)
+	registerFunc         func(ctx context.Context, record *domain.RecordIntent) error
+	removeFunc           func(ctx context.Context, record *domain.RecordIntent) error
 
-	lockTransactionCalled bool
-	listCalled            bool
-	registerCalled        bool
-	removeCalled          bool
-	closeCalled           bool
+	startHeartbeatCalled   bool
+	getLiveHostnamesCalled bool
+	lockTransactionCalled  bool
+	listCalled             bool
+	registerCalled         bool
+	removeCalled           bool
+	stopHeartbeatCalled    bool
 
 	registeredRecords []*domain.RecordIntent
 	removedRecords    []*domain.RecordIntent
+}
+
+func (m *mockRegistry) StartHeartbeat(ctx context.Context) error {
+	m.mu.Lock()
+	m.startHeartbeatCalled = true
+	m.mu.Unlock()
+
+	if m.startHeartbeatFunc != nil {
+		return m.startHeartbeatFunc(ctx)
+	}
+	return nil
+}
+
+func (m *mockRegistry) GetLiveHostnames(ctx context.Context) (map[string]struct{}, error) {
+	m.mu.Lock()
+	m.getLiveHostnamesCalled = true
+	m.mu.Unlock()
+
+	if m.getLiveHostnamesFunc != nil {
+		return m.getLiveHostnamesFunc(ctx)
+	}
+	return nil, nil
 }
 
 func (m *mockRegistry) LockTransaction(ctx context.Context, keys []string, fn func() error) error {
@@ -155,15 +195,10 @@ func (m *mockRegistry) Remove(ctx context.Context, record *domain.RecordIntent) 
 	return nil
 }
 
-func (m *mockRegistry) Close() error {
+func (m *mockRegistry) StopHeartbeat() {
 	m.mu.Lock()
-	m.closeCalled = true
+	m.stopHeartbeatCalled = true
 	m.mu.Unlock()
-
-	if m.closeFunc != nil {
-		return m.closeFunc()
-	}
-	return nil
 }
 
 func (m *mockRegistry) WasRegisterCalled() bool {
@@ -190,10 +225,10 @@ func (m *mockRegistry) WasLockTransactionCalled() bool {
 	return m.lockTransactionCalled
 }
 
-func (m *mockRegistry) WasCloseCalled() bool {
+func (m *mockRegistry) WasStopHeartbeatCalled() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.closeCalled
+	return m.stopHeartbeatCalled
 }
 
 func (m *mockRegistry) GetRegisteredRecords() []*domain.RecordIntent {

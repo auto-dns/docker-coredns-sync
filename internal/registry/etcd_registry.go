@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/auto-dns/docker-coredns-sync/internal/config"
@@ -15,20 +16,255 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-type EtcdRegistry struct {
-	client   etcdClient
-	cfg      *config.EtcdConfig
-	hostname string
-	logger   zerolog.Logger
+// registryMetrics is an optional sink for etcd operation metrics. Implementations
+// must be safe for concurrent use.
+type registryMetrics interface {
+	IncEtcdError()
+	IncLockFailure()
 }
 
-func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string, logger zerolog.Logger) *EtcdRegistry {
+// heartbeatPrefix is where per-host liveness keys live. It is deliberately
+// outside the SkyDNS path_prefix so CoreDNS never sees these keys and List()
+// never parses them as DNS records. Config validation enforces that path_prefix
+// does not overlap it.
+const heartbeatPrefix = config.HeartbeatKeyPrefix
+
+type EtcdRegistry struct {
+	client       etcdClient
+	cfg          *config.EtcdConfig
+	hostname     string
+	heartbeatTTL int
+	logger       zerolog.Logger
+	metrics      registryMetrics
+
+	hbMu     sync.Mutex
+	hbLease  clientv3.LeaseID
+	hbCancel context.CancelFunc
+	// hbActive is true only while this host holds a live leased heartbeat. It
+	// gates cross-host GC: a host whose StartHeartbeat has not (yet) succeeded
+	// must not garbage-collect any peer's records.
+	hbActive bool
+}
+
+func NewEtcdRegistry(client etcdClient, cfg *config.EtcdConfig, hostname string, heartbeatTTL int, logger zerolog.Logger) *EtcdRegistry {
 	return &EtcdRegistry{
-		client:   client,
-		cfg:      cfg,
-		hostname: hostname,
-		logger:   logger.With().Str("component", "etcd_registry").Logger(),
+		client:       client,
+		cfg:          cfg,
+		hostname:     hostname,
+		heartbeatTTL: heartbeatTTL,
+		logger:       logger.With().Str("component", "etcd_registry").Logger(),
 	}
+}
+
+// SetMetrics registers an optional sink for etcd operation/lock metrics. Safe
+// to leave unset.
+func (er *EtcdRegistry) SetMetrics(m registryMetrics) {
+	er.metrics = m
+}
+
+func (er *EtcdRegistry) incEtcdError() {
+	if er.metrics != nil {
+		er.metrics.IncEtcdError()
+	}
+}
+
+func (er *EtcdRegistry) incLockFailure() {
+	if er.metrics != nil {
+		er.metrics.IncLockFailure()
+	}
+}
+
+func heartbeatKey(hostname string) string {
+	return fmt.Sprintf("%s/%s", heartbeatPrefix, hostname)
+}
+
+// StartHeartbeat publishes this host's lease-backed liveness key and keeps the
+// lease alive for the lifetime of ctx. Heartbeating is mandatory: a host only
+// participates in cross-host GC (see GetLiveHostnames) once this succeeds, and
+// peers treat a host whose lease has expired as gone and reclaim its records.
+func (er *EtcdRegistry) StartHeartbeat(ctx context.Context) error {
+	key := heartbeatKey(er.hostname)
+
+	kaCtx, cancel := context.WithCancel(ctx)
+	kaCh, leaseID, err := er.grantAndKeepAlive(kaCtx, key)
+	if err != nil {
+		er.incEtcdError()
+		cancel()
+		return err
+	}
+
+	er.hbMu.Lock()
+	er.hbLease = leaseID
+	er.hbCancel = cancel
+	er.hbActive = true
+	er.hbMu.Unlock()
+
+	// Maintain the lease for the lifetime of kaCtx, re-establishing it if it is
+	// lost, so cross-host GC self-heals after a transient etcd outage.
+	go er.maintainHeartbeat(kaCtx, key, kaCh)
+
+	er.logger.Info().Str("key", key).Int("ttl", er.heartbeatTTL).Msg("heartbeat started")
+	return nil
+}
+
+// grantAndKeepAlive grants a fresh lease, publishes the liveness key under it,
+// and starts keepalive. On any error it best-effort cleans up the partial state
+// and returns the error.
+func (er *EtcdRegistry) grantAndKeepAlive(ctx context.Context, key string) (<-chan *clientv3.LeaseKeepAliveResponse, clientv3.LeaseID, error) {
+	leaseResp, err := er.client.Grant(ctx, int64(er.heartbeatTTL))
+	if err != nil {
+		return nil, 0, fmt.Errorf("grant heartbeat lease: %w", err)
+	}
+	if _, err := er.client.Put(ctx, key, er.hostname, clientv3.WithLease(leaseResp.ID)); err != nil {
+		er.bestEffortCleanup(leaseResp.ID, key)
+		return nil, 0, fmt.Errorf("put heartbeat key %q: %w", key, err)
+	}
+	kaCh, err := er.client.KeepAlive(ctx, leaseResp.ID)
+	if err != nil {
+		er.bestEffortCleanup(leaseResp.ID, key)
+		return nil, 0, fmt.Errorf("keepalive heartbeat lease: %w", err)
+	}
+	return kaCh, leaseResp.ID, nil
+}
+
+// maintainHeartbeat drains keepalive responses to keep the lease alive. When the
+// keepalive channel closes while the host is still meant to be heartbeating
+// (kaCtx not cancelled), the lease has been lost — most often because an etcd
+// outage exceeded the lease TTL. It then marks the host inactive (disabling
+// cross-host GC, since the host can no longer vouch for its own liveness) and
+// re-establishes a fresh lease before resuming.
+func (er *EtcdRegistry) maintainHeartbeat(kaCtx context.Context, key string, kaCh <-chan *clientv3.LeaseKeepAliveResponse) {
+	for {
+		for range kaCh {
+		}
+		// Channel closed. A cancelled kaCtx means a deliberate shutdown.
+		if kaCtx.Err() != nil {
+			return
+		}
+		er.hbMu.Lock()
+		er.hbActive = false
+		er.hbMu.Unlock()
+		er.logger.Warn().Str("key", key).Msg("heartbeat lease lost; cross-host GC disabled until re-established")
+
+		newCh, ok := er.reestablishHeartbeat(kaCtx, key)
+		if !ok {
+			return // kaCtx cancelled while retrying
+		}
+		kaCh = newCh
+	}
+}
+
+// reestablishHeartbeat re-grants the lease, re-publishes the liveness key, and
+// restarts keepalive, retrying with bounded backoff until it succeeds or kaCtx
+// is cancelled. On success it records the new lease and re-activates GC.
+func (er *EtcdRegistry) reestablishHeartbeat(kaCtx context.Context, key string) (<-chan *clientv3.LeaseKeepAliveResponse, bool) {
+	const (
+		initialBackoff = 1 * time.Second
+		maxBackoff     = 30 * time.Second
+	)
+	backoff := initialBackoff
+	for {
+		if kaCtx.Err() != nil {
+			return nil, false
+		}
+		kaCh, leaseID, err := er.grantAndKeepAlive(kaCtx, key)
+		if err == nil {
+			er.hbMu.Lock()
+			er.hbLease = leaseID
+			er.hbActive = true
+			er.hbMu.Unlock()
+			er.logger.Info().Str("key", key).Msg("heartbeat re-established")
+			return kaCh, true
+		}
+		er.incEtcdError()
+		er.logger.Warn().Err(err).Dur("retry_in", backoff).Msg("failed to re-establish heartbeat; retrying")
+		select {
+		case <-kaCtx.Done():
+			return nil, false
+		case <-time.After(backoff):
+		}
+		if backoff < maxBackoff {
+			if backoff *= 2; backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+		}
+	}
+}
+
+// bestEffortCleanup removes a partially-created heartbeat key/lease using a
+// short background context so it runs even when the caller's context is done.
+func (er *EtcdRegistry) bestEffortCleanup(lease clientv3.LeaseID, key string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _ = er.client.Delete(ctx, key)
+	_, _ = er.client.Revoke(ctx, lease)
+}
+
+// stopHeartbeat cancels the keepalive and best-effort removes the liveness key.
+func (er *EtcdRegistry) stopHeartbeat() {
+	er.hbMu.Lock()
+	cancel := er.hbCancel
+	lease := er.hbLease
+	er.hbCancel = nil
+	er.hbLease = 0
+	er.hbActive = false
+	er.hbMu.Unlock()
+
+	// Nothing to tear down if a heartbeat was never started (e.g. StartHeartbeat
+	// failed). On a clean shutdown the key is removed and the lease revoked so
+	// peers notice the host is gone promptly rather than waiting out the TTL.
+	if cancel == nil {
+		return
+	}
+	cancel()
+
+	ctx, cancelTimeout := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelTimeout()
+	if _, err := er.client.Delete(ctx, heartbeatKey(er.hostname)); err != nil {
+		er.logger.Warn().Err(err).Msg("delete heartbeat key on shutdown")
+	}
+	if _, err := er.client.Revoke(ctx, lease); err != nil {
+		er.logger.Warn().Err(err).Msg("revoke heartbeat lease on shutdown")
+	}
+}
+
+// GetLiveHostnames returns the set of hostnames with a live heartbeat key —
+// the hosts whose records must not be garbage-collected.
+//
+// It returns (nil, nil) unless this host is itself actively heartbeating, which
+// callers must treat as "cross-host GC disabled" — never as "every host is
+// dead". This guarantees a host whose StartHeartbeat failed never reaps a peer's
+// records.
+//
+// The read is linearizable (no WithSerializable): it authorizes deletions, so a
+// stale read from a lagging member that omitted a live host could otherwise
+// destroy that host's records.
+func (er *EtcdRegistry) GetLiveHostnames(ctx context.Context) (map[string]struct{}, error) {
+	er.hbMu.Lock()
+	active := er.hbActive
+	er.hbMu.Unlock()
+	if !active {
+		return nil, nil
+	}
+
+	base := heartbeatPrefix
+	resp, err := er.client.Get(ctx, base+"/", clientv3.WithPrefix(), clientv3.WithKeysOnly())
+	if err != nil {
+		er.incEtcdError()
+		return nil, fmt.Errorf("list heartbeat keys under %q: %w", base, err)
+	}
+
+	live := make(map[string]struct{}, len(resp.Kvs))
+	for _, kv := range resp.Kvs {
+		hostname := strings.TrimPrefix(string(kv.Key), base+"/")
+		if hostname == "" {
+			continue
+		}
+		live[hostname] = struct{}{}
+	}
+	// This host is always considered live while it is reconciling.
+	live[er.hostname] = struct{}{}
+	return live, nil
 }
 
 // getNextIndexedKey generates a new etcd key for a record based on its fully qualified domain name (fqdn).
@@ -38,6 +274,7 @@ func (er *EtcdRegistry) getNextIndexedKey(ctx context.Context, fqdn string) (str
 
 	resp, err := er.client.Get(ctx, base, clientv3.WithPrefix(), clientv3.WithKeysOnly(), clientv3.WithSerializable())
 	if err != nil {
+		er.incEtcdError()
 		return "", fmt.Errorf("list existing indices under %q: %w", base, err)
 	}
 	for _, kv := range resp.Kvs {
@@ -76,6 +313,7 @@ func (er *EtcdRegistry) Register(ctx context.Context, ri *domain.RecordIntent) e
 		return fmt.Errorf("marshal etcd value for %q: %w", fqdn, err)
 	}
 	if _, err := er.client.Put(ctx, key, value); err != nil {
+		er.incEtcdError()
 		return fmt.Errorf("put key %q: %w", key, err)
 	}
 	er.logger.Info().Str("fqdn", ri.Record.Name).Str("kind", string(ri.Record.Kind)).Str("host", ri.Record.Value).Str("owner_hostname", ri.Hostname).Str("owner_container_id", ri.ContainerId).Str("key", key).Msg("registered record")
@@ -96,6 +334,7 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *domain.RecordIntent) err
 
 	resp, err := er.client.Get(ctx, base, clientv3.WithPrefix())
 	if err != nil {
+		er.incEtcdError()
 		return fmt.Errorf("list keys under base %q: %w", base, err)
 	}
 
@@ -143,6 +382,7 @@ func (er *EtcdRegistry) Remove(ctx context.Context, ri *domain.RecordIntent) err
 			ops = append(ops, clientv3.OpDelete(k))
 		}
 		if _, err := txn.Then(ops...).Commit(); err != nil {
+			er.incEtcdError()
 			er.logger.Warn().Err(err).Int("batch_start", i).Int("batch_end", end).Msg("remove: batch delete failed")
 			if firstErr == nil {
 				firstErr = fmt.Errorf("batch delete [%d:%d]: %w", i, end, err)
@@ -162,6 +402,7 @@ func (er *EtcdRegistry) List(ctx context.Context) ([]*domain.RecordIntent, error
 	prefix := er.cfg.PathPrefix
 	resp, err := er.client.Get(ctx, prefix, clientv3.WithPrefix(), clientv3.WithSerializable())
 	if err != nil {
+		er.incEtcdError()
 		return nil, fmt.Errorf("list under prefix %q: %w", prefix, err)
 	}
 	intents := make([]*domain.RecordIntent, 0, len(resp.Kvs))
@@ -197,6 +438,7 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 		lockKey := fmt.Sprintf("/locks/%s", key)
 		leaseResp, err := er.client.Grant(ctx, int64(er.cfg.LockTTL))
 		if err != nil {
+			er.incEtcdError()
 			return fmt.Errorf("failed to create lease: %w", err)
 		}
 		acquired := false
@@ -213,6 +455,7 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 				Then(clientv3.OpPut(lockKey, er.hostname, clientv3.WithLease(leaseResp.ID))).
 				Commit()
 			if err != nil {
+				er.incEtcdError()
 				return fmt.Errorf("acquire lock %q: %w", lockKey, err)
 			}
 			if txnResp.Succeeded {
@@ -222,6 +465,7 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 				kaCtx, cancel := context.WithCancel(ctx)
 				kaCh, err := er.client.KeepAlive(kaCtx, leaseResp.ID)
 				if err != nil {
+					er.incEtcdError()
 					cancel()
 					// best-effort cleanup
 					_, _ = er.client.Delete(ctx, lockKey)
@@ -242,6 +486,7 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 			time.Sleep(time.Duration(er.cfg.LockRetryInterval * float64(time.Second)))
 		}
 		if !acquired {
+			er.incLockFailure()
 			if _, e := er.client.Revoke(ctx, leaseResp.ID); e != nil {
 				er.logger.Warn().Err(e).Str("lock", lockKey).Msg("revoke unused lease after acquire timeout")
 			}
@@ -265,6 +510,15 @@ func (er *EtcdRegistry) LockTransaction(ctx context.Context, keys []string, fn f
 	return err
 }
 
+// StopHeartbeat tears down this host's heartbeat (cancels keepalive, removes the
+// liveness key, and revokes the lease) without closing the underlying etcd
+// client, whose lifecycle is owned by the caller (the App). Safe to call when no
+// heartbeat was started.
+func (er *EtcdRegistry) StopHeartbeat() {
+	er.stopHeartbeat()
+}
+
 func (er *EtcdRegistry) Close() error {
+	er.stopHeartbeat()
 	return er.client.Close()
 }
