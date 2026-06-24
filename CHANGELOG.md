@@ -105,12 +105,34 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (not only once the last success ages out), and the auxiliary HTTP server sets
   write and idle timeouts in addition to the read-header timeout.
 
-### Notes
-- When upgrading a multi-host fleet, roll out to all hosts together: a host
-  running an older version doesn't publish a heartbeat, so it could be treated as
-  dead by upgraded hosts and have its records GC'd.
-- To retire a host, stop its daemon; its records are reclaimed automatically once
-  its heartbeat lease expires (after `app.heartbeat_ttl`).
+### Upgrade guide (0.6.x → 0.7.0)
+
+This release introduces always-on, lease-backed heartbeats and automatic
+cross-host garbage collection of orphaned records. No configuration keys were
+renamed or removed and every new setting has a default, so existing config files
+and environment variables keep working unchanged — but the new GC behavior means
+a few steps are required:
+
+1. **Upgrade all hosts together.** A host running an older version does not
+   publish a heartbeat, so upgraded hosts treat it as dead and garbage-collect
+   its records. Roll the whole fleet in a single window rather than host-by-host;
+   do not run 0.6.x and 0.7.0 against the same etcd for an extended period.
+2. **Make sure `etcd.path_prefix` does not overlap the heartbeat keyspace.**
+   Heartbeats are written under the reserved prefix
+   `/docker-coredns-sync/heartbeat`, deliberately outside `etcd.path_prefix`.
+   Startup now **fails fast** if the two overlap. The default (`/skydns`) is
+   unaffected — only a custom prefix that collides needs changing. If you run
+   etcd with authentication/RBAC, grant the daemon read/write access to this
+   reserved keyspace in addition to `etcd.path_prefix`.
+3. **Expect orphaned records to be reclaimed automatically.** Once every host is
+   upgraded, records owned by a host that is gone are removed after its heartbeat
+   lease expires. To retire a host, simply stop its daemon — no manual etcd
+   cleanup is needed. Tune the grace period with `app.heartbeat_ttl`
+   (`--app.heartbeat-ttl`, default `30s`, must be > 0); transient outages shorter
+   than this do not trigger deletion.
+
+Downgrading is safe: a 0.6.x binary ignores the heartbeat keys, which expire on
+their own via their lease.
 
 ## [0.6.1] - 2026-06-17
 
