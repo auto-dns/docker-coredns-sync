@@ -17,7 +17,7 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 >   These tags point at pre-migration commits that are **not reachable from the
 >   current `main`**.
 
-## [Unreleased]
+## [0.7.0] - 2026-06-24
 
 ### Added
 - `CONTRIBUTING.md` documenting versioning, branch, tag/release, issue, and
