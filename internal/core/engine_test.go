@@ -320,8 +320,8 @@ func TestSyncEngine_Run_ContextCancellation(t *testing.T) {
 	if err != context.DeadlineExceeded {
 		t.Errorf("expected context.DeadlineExceeded, got %v", err)
 	}
-	if !reg.WasCloseCalled() {
-		t.Error("expected Close to be called on shutdown")
+	if !reg.WasStopHeartbeatCalled() {
+		t.Error("expected StopHeartbeat to be called on shutdown")
 	}
 }
 
@@ -694,7 +694,7 @@ func TestSyncEngine_Run_RegisterError(t *testing.T) {
 	// Should not crash, just log error
 }
 
-func TestSyncEngine_Run_CloseError(t *testing.T) {
+func TestSyncEngine_Run_StopsHeartbeatOnShutdown(t *testing.T) {
 	eventCh := make(chan domain.ContainerEvent)
 	close(eventCh)
 
@@ -709,11 +709,7 @@ func TestSyncEngine_Run_CloseError(t *testing.T) {
 			return []*domain.RecordIntent{}
 		},
 	}
-	reg := &mockRegistry{
-		closeFunc: func() error {
-			return errors.New("close failed")
-		},
-	}
+	reg := &mockRegistry{}
 	cfg := testAppConfig()
 	cfg.PollInterval = 10 // Long enough to not trigger
 
@@ -724,10 +720,9 @@ func TestSyncEngine_Run_CloseError(t *testing.T) {
 
 	err := engine.Run(ctx)
 
-	if !reg.WasCloseCalled() {
-		t.Error("expected Close to be called")
+	if !reg.WasStopHeartbeatCalled() {
+		t.Error("expected StopHeartbeat to be called on shutdown")
 	}
-	// Context error should be returned, not Close error
 	if err != context.DeadlineExceeded {
 		t.Errorf("expected context.DeadlineExceeded, got %v", err)
 	}
@@ -881,6 +876,12 @@ func TestSyncEngine_Run_DryRunSkipsWrites(t *testing.T) {
 	}
 	if reg.WasRemoveCalled() {
 		t.Error("expected Remove NOT to be called in dry-run")
+	}
+	reg.mu.Lock()
+	hb := reg.startHeartbeatCalled
+	reg.mu.Unlock()
+	if hb {
+		t.Error("expected StartHeartbeat NOT to be called in dry-run (no etcd writes)")
 	}
 }
 

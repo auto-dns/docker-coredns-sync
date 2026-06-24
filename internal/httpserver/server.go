@@ -64,6 +64,8 @@ func NewServer(addr string, status *Status, metricsHandler http.Handler, logger 
 		srv: &http.Server{
 			Handler:           Handler(status, metricsHandler),
 			ReadHeaderTimeout: 5 * time.Second,
+			WriteTimeout:      10 * time.Second,
+			IdleTimeout:       60 * time.Second,
 		},
 		listener: ln,
 		logger:   logger,

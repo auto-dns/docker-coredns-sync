@@ -83,8 +83,12 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 	}
 
 	// Publish this host's liveness key so other hosts won't GC our records, and
-	// so we participate in cross-host GC of records owned by dead hosts.
-	if err := se.reg.StartHeartbeat(ctx); err != nil {
+	// so we participate in cross-host GC of records owned by dead hosts. In
+	// dry-run the daemon must not write to etcd at all, so heartbeating (and
+	// therefore cross-host GC participation) is skipped.
+	if se.cfg.DryRun {
+		se.logger.Info().Msg("dry-run: skipping heartbeat; this host will not publish liveness or participate in cross-host GC")
+	} else if err := se.reg.StartHeartbeat(ctx); err != nil {
 		se.logger.Error().Err(err).Msg("failed to start heartbeat; cross-host GC will be disabled this run")
 	}
 
@@ -183,10 +187,9 @@ func (se *SyncEngine) Run(ctx context.Context) error {
 			}
 		case <-ctx.Done():
 			se.logger.Info().Msg("SyncEngine shutting down")
-			err := se.reg.Close()
-			if err != nil {
-				se.logger.Error().Err(err).Msg("Error closing registry")
-			}
+			// Stop the heartbeat promptly so peers see this host leave; the etcd
+			// client itself is closed by the App, which owns its lifecycle.
+			se.reg.StopHeartbeat()
 			return ctx.Err()
 		}
 	}

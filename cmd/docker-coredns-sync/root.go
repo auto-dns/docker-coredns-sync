@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -55,9 +56,11 @@ func runWithDeps(cfg *config.Config, factory AppFactory, sigCh <-chan os.Signal)
 		}
 	}()
 
-	if err := application.Run(ctx); err != nil {
+	if err := application.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("app run error: %w", err)
 	}
+	// A context.Canceled error is the expected outcome of a signal-driven
+	// shutdown, so it is treated as a clean exit (return nil).
 	return nil
 }
 
@@ -108,6 +111,14 @@ func init() {
 	rootCmd.PersistentFlags().Bool("app.dry-run", false, "Log planned etcd changes without applying them")
 	viper.BindPFlag("app.dry_run", rootCmd.PersistentFlags().Lookup("app.dry-run"))
 
+	// Flag defaults are left at zero values so an unset flag does not override the
+	// real defaults configured via viper.SetDefault in internal/config.
+	rootCmd.PersistentFlags().Uint32("app.record-ttl", 0, "Default DNS record TTL in seconds (0 = unset; CoreDNS uses its own default)")
+	viper.BindPFlag("app.record_ttl", rootCmd.PersistentFlags().Lookup("app.record-ttl"))
+
+	rootCmd.PersistentFlags().Int("app.heartbeat-ttl", 0, "Lease TTL (seconds) for this host's liveness key; also the grace period before peers GC a stopped host's records")
+	viper.BindPFlag("app.heartbeat_ttl", rootCmd.PersistentFlags().Lookup("app.heartbeat-ttl"))
+
 	// EtcdConfig Flags
 	rootCmd.PersistentFlags().StringArray("etcd-endpoints", []string{"http://localhost:2379"}, "etcd endpoints to connect to (can specify multiple times)")
 	viper.BindPFlag("etcd.endpoints", rootCmd.PersistentFlags().Lookup("etcd-endpoints"))
@@ -118,8 +129,9 @@ func init() {
 	rootCmd.PersistentFlags().String("etcd.username", "", "Username for etcd authentication")
 	viper.BindPFlag("etcd.username", rootCmd.PersistentFlags().Lookup("etcd.username"))
 
-	rootCmd.PersistentFlags().String("etcd.password", "", "Password for etcd authentication")
-	viper.BindPFlag("etcd.password", rootCmd.PersistentFlags().Lookup("etcd.password"))
+	// Note: there is intentionally no --etcd.password flag. A password on the
+	// command line is exposed in the process list and shell history; set it via
+	// the DOCKER_COREDNS_SYNC_ETCD_PASSWORD env var or the config file instead.
 
 	rootCmd.PersistentFlags().String("etcd.tls.ca-file", "", "Path to the CA certificate for the etcd connection")
 	viper.BindPFlag("etcd.tls.ca_file", rootCmd.PersistentFlags().Lookup("etcd.tls.ca-file"))

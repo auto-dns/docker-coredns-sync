@@ -25,7 +25,7 @@ type upstreamRegistry interface {
 	List(ctx context.Context) ([]*domain.RecordIntent, error)
 	Register(ctx context.Context, record *domain.RecordIntent) error
 	Remove(ctx context.Context, record *domain.RecordIntent) error
-	Close() error
+	StopHeartbeat()
 }
 
 // reconcileReporter is an optional observer of reconciliation outcomes, used to

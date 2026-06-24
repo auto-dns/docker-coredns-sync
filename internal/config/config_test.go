@@ -242,6 +242,58 @@ func TestConfig_Validate_MultipleEndpoints(t *testing.T) {
 	}
 }
 
+func TestConfig_Validate_PathPrefixOverlapsHeartbeat(t *testing.T) {
+	for _, pp := range []string{
+		"/",
+		HeartbeatKeyPrefix,           // exact match
+		"/docker-coredns-sync",       // parent of the heartbeat prefix
+		HeartbeatKeyPrefix + "/host", // child of the heartbeat prefix
+	} {
+		t.Run(pp, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Etcd.PathPrefix = pp
+			if err := cfg.validate(); err == nil {
+				t.Errorf("expected error for path_prefix %q overlapping heartbeat prefix", pp)
+			}
+		})
+	}
+}
+
+func TestConfig_Validate_PathPrefixNonOverlapping(t *testing.T) {
+	for _, pp := range []string{"/skydns", "/dns", "/docker-coredns-sync-records"} {
+		t.Run(pp, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.Etcd.PathPrefix = pp
+			if err := cfg.validate(); err != nil {
+				t.Errorf("expected path_prefix %q to be valid, got: %v", pp, err)
+			}
+		})
+	}
+}
+
+func TestConfig_Validate_TLSConfiguredWithoutHTTPSEndpoint(t *testing.T) {
+	cfg := validConfig()
+	cfg.Etcd.Endpoints = []string{"http://localhost:2379"}
+	cfg.Etcd.TLS.CAFile = "/etc/ssl/ca.pem"
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error when TLS is configured but no endpoint uses https://")
+	}
+
+	// The same TLS settings with an https:// endpoint are valid.
+	cfg.Etcd.Endpoints = []string{"https://localhost:2379"}
+	if err := cfg.validate(); err != nil {
+		t.Errorf("expected TLS with an https:// endpoint to be valid, got: %v", err)
+	}
+}
+
+func TestConfig_Validate_PasswordWithoutUsername(t *testing.T) {
+	cfg := validConfig()
+	cfg.Etcd.Password = "secret"
+	if err := cfg.validate(); err == nil {
+		t.Error("expected error when etcd.password is set without etcd.username")
+	}
+}
+
 func TestConfig_Validate_EmptyPathPrefix(t *testing.T) {
 	cfg := validConfig()
 	cfg.Etcd.PathPrefix = ""

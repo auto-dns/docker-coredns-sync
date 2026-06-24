@@ -57,8 +57,9 @@ func (s *Status) RecordReconcile(err error) {
 }
 
 // Ready reports whether the daemon is ready to serve, with a human-readable
-// reason when it is not. Readiness requires the Docker stream to be connected
-// and a reconciliation to have succeeded within the readiness threshold.
+// reason when it is not. Readiness requires the Docker stream to be connected,
+// the most recent reconciliation pass to have not failed, and a reconciliation
+// to have succeeded within the readiness threshold.
 func (s *Status) Ready() (bool, string) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -68,6 +69,9 @@ func (s *Status) Ready() (bool, string) {
 	}
 	if !s.dockerConnected {
 		return false, "docker event stream not connected"
+	}
+	if s.lastReconcileErr != nil {
+		return false, "last reconciliation failed: " + s.lastReconcileErr.Error()
 	}
 	if s.lastReconcileSuccess.IsZero() {
 		return false, "no successful reconciliation yet"
